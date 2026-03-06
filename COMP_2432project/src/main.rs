@@ -1,23 +1,6 @@
-mod test_rust;
-//test
-
-
-
-
-
-
-
-
-
-
-
-
-
+//! Application entry point for demo scenarios.
+// TODO: Implement demo flows using the `COMP_2432project` library.
 
 fn main() {
-    println!("Hello, world!");
-    
-
-    test_rust::check_if_run_successfully();
-    // test_rust::check_if_run_successfully();
+    // TODO: Wire up coordinator, workers, scheduling, and monitoring for a full demo.
 }
