@@ -84,59 +84,238 @@
 | 代码质量 | 5% | 代码结构清晰、可读性强；符合Rust惯用写法；错误处理严谨、规范；测试覆盖率合理 |
 | 报告 & 演示 | 20% | 书面报告结构规范、内容完整、逻辑清晰；视频演示效果清晰、功能验证充分、讲解到位 |
 
+================================================================================
+
+PROJECT BLAZE - 完整项目文件结构
+
+参考 Linux 内核和现代 Rust 最佳实践设计
+
+================================================================================
+
 project-blaze/
-├── Cargo.toml
-├── README.md
-├── src/
-│   ├── lib.rs                    # 库入口，导出公共 API
-│   ├── main.rs                   # 应用入口，演示场景
-│   │
-│   ├── types.rs                  # 核心类型定义
-│   ├── error.rs                  # 错误类型
-│   ├── config.rs                 # 配置管理
-│   │
-│   ├── coordinator.rs            # 协调器
-│   │
-│   ├── task_queue/               # 任务管理模块组
-│   │   ├── mod.rs                # Trait 定义
-│   │   ├── fifo_queue.rs         # FIFO 实现
-│   │   └── scheduler.rs          # 调度器（可选）
-│   │
-│   ├── resource/                 # 资源控制模块组
-│   │   ├── mod.rs                # Trait 定义
-│   │   ├── zone_control.rs       # 区域控制实现
-│   │   └── guard.rs              # 锁保护
-│   │
-│   ├── health/                   # 健康监控模块组
-│   │   ├── mod.rs                # Trait 定义
-│   │   ├── heartbeat_monitor.rs  # 心跳监控实现
-│   │   └── reporter.rs           # 健康报告
-│   │
-│   ├── worker/                   # 工作线程模块组
-│   │   ├── mod.rs                # Trait 定义
-│   │   ├── robot.rs              # 机器人实现
-│   │   └── pool.rs               # 线程池
-│   │
-│   ├── sync/                     # 同步基础设施
-│   │   ├── mod.rs
-│   │   ├── shared.rs             # 共享状态包装
-│   │   ├── channel.rs            # 通道抽象
-│   │   └── atomic.rs             # 原子操作
-│   │
-│   └── observability/            # 可观测性
-│       ├── mod.rs
-│       ├── logging.rs            # 日志
-│       └── metrics.rs            # 指标
+
+├── Cargo.toml                      # Rust 项目配置文件
+
+├── Cargo.lock                      # 依赖锁定文件
+
+├── README.md                       # 项目说明文档
+
+├── DESIGN.md                       # 设计文档
+
+├── .gitignore                      # Git 忽略文件
+
 │
-├── tests/
-│   ├── integration/              # 集成测试
-│   │   ├── basic_scenario.rs
-│   │   └── concurrent_access.rs
-│   │
-│   └── stress/                   # 压力测试
-│       ├── high_concurrency.rs
-│       └── resource_exhaustion.rs
+
+├── src/                            # 源代码目录
+
+│   ├── main.rs                     # 应用入口，Demo 场景
+
+│   ├── lib.rs                      # 库根，导出公共 API
+
+│   │
+
+│   ├── types/                      # 类型定义模块（类似 Linux include/）
+
+│   │   ├── mod.rs                  # 模块根
+
+│   │   ├── task.rs                 # Task 类型定义
+
+│   │   ├── robot.rs                # Robot 类型定义
+
+│   │   ├── zone.rs                 # Zone 类型定义
+
+│   │   ├── config.rs               # Config 配置类型
+
+│   │   └── error.rs                # Error 错误类型
+
+│   │
+
+│   ├── scheduler/                  # 调度器模块（类似 Linux kernel/sched/）
+
+│   │   ├── mod.rs                  # 调度器接口定义
+
+│   │   ├── queue.rs                # 任务队列核心实现
+
+│   │   ├── fifo.rs                 # FIFO 调度策略
+
+│   │   ├── priority.rs             # 优先级调度（扩展）
+
+│   │   ├── round_robin.rs          # Round Robin（扩展）
+
+│   │   └── stats.rs                # 调度统计信息
+
+│   │
+
+│   ├── mm/                         # 资源管理模块（类似 Linux mm/）
+
+│   │   ├── mod.rs                  # 资源管理接口
+
+│   │   ├── zone_allocator.rs      # Zone 分配器核心
+
+│   │   ├── lock_guard.rs           # RAII 锁保护
+
+│   │   ├── deadlock_detector.rs   # 死锁检测（扩展）
+
+│   │   └── allocation_table.rs    # 资源分配表
+
+│   │
+
+│   ├── monitor/                    # 监控模块（类似 systemd/watchdog）
+
+│   │   ├── mod.rs                  # 监控接口定义
+
+│   │   ├── heartbeat.rs            # 心跳监控实现
+
+│   │   ├── health_checker.rs      # 健康检查器
+
+│   │   ├── reporter.rs             # 状态报告器
+
+│   │   └── metrics.rs              # 监控指标收集
+
+│   │
+
+│   ├── worker/                     # 工作线程模块（类似用户态进程）
+
+│   │   ├── mod.rs                  # Worker trait 定义
+
+│   │   ├── robot.rs                # Robot Worker 实现
+
+│   │   ├── pool.rs                 # Worker Pool 线程池
+
+│   │   ├── state.rs                # Worker 状态机
+
+│   │   └── lifecycle.rs            # 生命周期管理
+
+│   │
+
+│   ├── coordinator/                # 协调器模块（类似内核核心）
+
+│   │   ├── mod.rs                  # Coordinator 实现
+
+│   │   ├── builder.rs              # Builder 模式构造器
+
+│   │   ├── syscall.rs              # 系统调用接口层
+
+│   │   └── lifecycle.rs            # 系统生命周期管理
+
+│   │
+
+│   ├── sync/                       # 同步原语模块（类似 Linux kernel/locking/）
+
+│   │   ├── mod.rs                  # 同步原语导出
+
+│   │   ├── mutex.rs                # Mutex 封装
+
+│   │   ├── rwlock.rs               # RwLock 封装
+
+│   │   ├── atomic.rs               # 原子操作封装
+
+│   │   ├── channel.rs              # Channel 通信
+
+│   │   └── barrier.rs              # 屏障同步
+
+│   │
+
+│   ├── util/                       # 工具模块
+
+│   │   ├── mod.rs                  # 工具函数导出
+
+│   │   ├── logger.rs               # 日志系统
+
+│   │   ├── timer.rs                # 计时器
+
+│   │   ├── id_generator.rs         # ID 生成器
+
+│   │   └── rand.rs                 # 随机数生成
+
+│   │
+
+│   └── prelude.rs                  # 常用导入预设
+
 │
-└── benches/                      # 性能基准测试
-    ├── task_throughput.rs
-    └── lock_contention.rs
+
+├── tests/                          # 集成测试目录
+
+│   ├── common/                     # 测试公共代码
+
+│   │   ├── mod.rs                  # 测试辅助函数
+
+│   │   └── fixtures.rs             # 测试数据 fixtures
+
+│   │
+
+│   ├── test_scheduler.rs           # 调度器集成测试
+
+│   ├── test_zone_control.rs        # 区域控制测试
+
+│   ├── test_monitor.rs             # 监控模块测试
+
+│   ├── test_concurrency.rs         # 并发安全性测试
+
+│   ├── test_demo_scenarios.rs      # Demo 场景测试
+
+│   └── test_stress.rs              # 压力测试
+
+│
+
+├── benches/                        # 性能基准测试（使用 criterion）
+
+│   ├── scheduler_bench.rs          # 调度器性能测试
+
+│   ├── zone_lock_bench.rs          # 锁竞争性能测试
+
+│   ├── heartbeat_bench.rs          # 心跳检测性能测试
+
+│   └── throughput_bench.rs         # 系统吞吐量测试
+
+│
+
+├── examples/                       # 示例程序
+
+│   ├── basic_demo.rs               # 基础演示
+
+│   ├── priority_scheduling.rs     # 优先级调度示例
+
+│   ├── deadlock_demo.rs            # 死锁检测示例
+
+│   └── high_load.rs                # 高负载测试
+
+│
+
+├── docs/                           # 文档目录
+
+│   ├── architecture.md             # 架构设计文档
+
+│   ├── api.md                      # API 使用文档
+
+│   ├── benchmarks.md               # 性能测试报告
+
+│   ├── images/                     # 文档图片
+
+│   │   ├── architecture.png        # 系统架构图
+
+│   │   └── execution_flow.png      # 执行流程图
+
+│   └── report_template.md          # 项目报告模板
+
+│
+
+├── scripts/                        # 脚本工具
+
+│   ├── run_demo.sh                 # 运行 Demo 脚本
+
+│   ├── run_tests.sh                # 运行测试脚本
+
+│   ├── generate_report.sh          # 生成报告脚本
+
+│   └── benchmark.sh                # 性能测试脚本
+
+│
+
+└── config/                         # 配置文件目录
+
+├── default.toml                # 默认配置
+
+├── demo.toml                   # Demo 配置
+
+└── stress.toml                 # 压力测试配置
