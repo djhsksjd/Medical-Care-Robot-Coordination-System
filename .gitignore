@@ -8,3 +8,23 @@
 /COMP_2432project/target
 
 /COMP_2432project/*.lock
+# Rust build artifacts
+/target/
+Cargo.lock
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+*.iml
+
+# OS files
+Thumbs.db
+
+# Compiled files
+*.o
+*.so
+*.dylib
