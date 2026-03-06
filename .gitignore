@@ -1,0 +1,10 @@
+# 忽略所有.log文件
+*.log
+# 但不忽略src/目录下的demo.log（演示日志需提交）
+!src/demo.log
+# 忽略所有目录下的tmp子目录
+**/tmp/
+
+/COMP_2432project/target
+
+/COMP_2432project/*.lock

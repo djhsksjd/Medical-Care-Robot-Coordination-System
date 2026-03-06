@@ -84,4 +84,59 @@
 | 代码质量 | 5% | 代码结构清晰、可读性强；符合Rust惯用写法；错误处理严谨、规范；测试覆盖率合理 |
 | 报告 & 演示 | 20% | 书面报告结构规范、内容完整、逻辑清晰；视频演示效果清晰、功能验证充分、讲解到位 |
 
-我可以帮你把这份需求文档拆分为**开发阶段任务清单**（按模块开发→测试→报告撰写→演示制作划分），需要吗？
+project-blaze/
+├── Cargo.toml
+├── README.md
+├── src/
+│   ├── lib.rs                    # 库入口，导出公共 API
+│   ├── main.rs                   # 应用入口，演示场景
+│   │
+│   ├── types.rs                  # 核心类型定义
+│   ├── error.rs                  # 错误类型
+│   ├── config.rs                 # 配置管理
+│   │
+│   ├── coordinator.rs            # 协调器
+│   │
+│   ├── task_queue/               # 任务管理模块组
+│   │   ├── mod.rs                # Trait 定义
+│   │   ├── fifo_queue.rs         # FIFO 实现
+│   │   └── scheduler.rs          # 调度器（可选）
+│   │
+│   ├── resource/                 # 资源控制模块组
+│   │   ├── mod.rs                # Trait 定义
+│   │   ├── zone_control.rs       # 区域控制实现
+│   │   └── guard.rs              # 锁保护
+│   │
+│   ├── health/                   # 健康监控模块组
+│   │   ├── mod.rs                # Trait 定义
+│   │   ├── heartbeat_monitor.rs  # 心跳监控实现
+│   │   └── reporter.rs           # 健康报告
+│   │
+│   ├── worker/                   # 工作线程模块组
+│   │   ├── mod.rs                # Trait 定义
+│   │   ├── robot.rs              # 机器人实现
+│   │   └── pool.rs               # 线程池
+│   │
+│   ├── sync/                     # 同步基础设施
+│   │   ├── mod.rs
+│   │   ├── shared.rs             # 共享状态包装
+│   │   ├── channel.rs            # 通道抽象
+│   │   └── atomic.rs             # 原子操作
+│   │
+│   └── observability/            # 可观测性
+│       ├── mod.rs
+│       ├── logging.rs            # 日志
+│       └── metrics.rs            # 指标
+│
+├── tests/
+│   ├── integration/              # 集成测试
+│   │   ├── basic_scenario.rs
+│   │   └── concurrent_access.rs
+│   │
+│   └── stress/                   # 压力测试
+│       ├── high_concurrency.rs
+│       └── resource_exhaustion.rs
+│
+└── benches/                      # 性能基准测试
+    ├── task_throughput.rs
+    └── lock_contention.rs
