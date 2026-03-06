@@ -1,0 +1,277 @@
+:root {
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  line-height: 1.4;
+  font-weight: 400;
+  color: #111827;
+  background-color: #f3f4f6;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+#app {
+  height: 100vh;
+}
+
+button {
+  border-radius: 6px;
+  border: 1px solid #d1d5db;
+  padding: 0.4rem 0.8rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  font-family: inherit;
+  background-color: #ffffff;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+button:hover {
+  border-color: #2563eb;
+  background-color: #eff6ff;
+}
+
+button:focus,
+button:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 1px;
+}
+
+.app-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+  font-size: 1rem;
+  color: #4b5563;
+}
+
+.dashboard-root {
+  display: flex;
+  height: 100%;
+}
+
+.side-filters {
+  width: 230px;
+  border-right: 1px solid #e5e7eb;
+  padding: 16px;
+  background: #f9fafb;
+  display: flex;
+  flex-direction: column;
+}
+
+.side-filters-title {
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.side-filters-field {
+  display: flex;
+  flex-direction: column;
+  font-size: 0.875rem;
+  margin-bottom: 8px;
+}
+
+.side-filters-field span {
+  margin-bottom: 4px;
+}
+
+.side-filters-field select {
+  padding: 4px 6px;
+  border-radius: 4px;
+  border: 1px solid #d1d5db;
+  font-size: 0.875rem;
+}
+
+.dashboard-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.topbar {
+  height: 56px;
+  padding: 0 16px;
+  border-bottom: 1px solid #e5e7eb;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #f9fafb;
+}
+
+.topbar-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.topbar-title {
+  font-weight: 600;
+}
+
+.topbar-status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+}
+
+.topbar-subtitle {
+  font-size: 0.75rem;
+  color: #6b7280;
+}
+
+.topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.topbar-metrics {
+  font-size: 0.75rem;
+  color: #6b7280;
+  margin-right: 8px;
+}
+
+.dashboard-content {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+}
+
+.dashboard-left {
+  flex: 2;
+  padding: 16px;
+  overflow: auto;
+}
+
+.dashboard-right {
+  flex: 1.5;
+  padding: 16px;
+  border-left: 1px solid #e5e7eb;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.section-title {
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.tasks-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+  background: #ffffff;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.tasks-table th,
+.tasks-table td {
+  padding: 6px 8px;
+  border-bottom: 1px solid #f3f4f6;
+  text-align: left;
+}
+
+.tasks-table thead th {
+  background: #f9fafb;
+  font-weight: 500;
+}
+
+.panel {
+  background: #ffffff;
+  border-radius: 6px;
+  border: 1px solid #e5e7eb;
+  padding: 10px 12px;
+}
+
+.robot-card {
+  border-radius: 4px;
+  border: 1px solid #e5e7eb;
+  padding: 8px;
+  margin-bottom: 8px;
+  background: #f9fafb;
+}
+
+.robot-header {
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
+.robot-sub {
+  font-size: 0.75rem;
+  color: #6b7280;
+}
+
+.zones-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.zone-card {
+  border-radius: 4px;
+  border: 1px solid #e5e7eb;
+  padding: 8px;
+  min-width: 120px;
+  background: #f9fafb;
+}
+
+.zone-name {
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
+.zone-sub {
+  font-size: 0.75rem;
+  color: #6b7280;
+}
+
+.zone-bar {
+  margin-top: 4px;
+  height: 4px;
+  border-radius: 999px;
+  background: #e5e7eb;
+  overflow: hidden;
+}
+
+.zone-bar-inner {
+  height: 100%;
+}
+
+.config-description {
+  font-size: 0.75rem;
+  color: #6b7280;
+  margin-bottom: 6px;
+}
+
+.config-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.8rem;
+}
+
+.config-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.config-form input,
+.config-form select {
+  padding: 4px 6px;
+  border-radius: 4px;
+  border: 1px solid #d1d5db;
+  font-size: 0.8rem;
+}

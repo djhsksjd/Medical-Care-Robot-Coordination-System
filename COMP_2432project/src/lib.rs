@@ -1,6 +1,7 @@
 //! Core library entry for the project-blaze style OS scheduler demo.
-// TODO: Re-export modules and provide high-level APIs.
+//! 可以把这里当成「内核导出表」，统一对外暴露各个子系统模块和 HTTP API。
 
+pub mod api;
 pub mod types;
 pub mod scheduler;
 pub mod mm;

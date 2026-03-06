@@ -1,2 +1,46 @@
 //! Task type definitions representing scheduled work units.
-// TODO: Define task structures, identifiers, and related metadata.
+//! 在类 OS 里可以认为是「进程 / 线程」的抽象，后续可以继续扩展字段以模拟更多状态。
+
+use std::time::Duration;
+
+/// Unique identifier for a task.
+pub type TaskId = u64;
+
+/// Simple priority levels. V1 mostly uses `Normal`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TaskPriority {
+    Low,
+    Normal,
+    High,
+}
+
+/// Execution status of a task.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TaskStatus {
+    Pending,
+    Running,
+    Finished,
+}
+
+/// Basic task structure scheduled and executed by workers.
+#[derive(Debug, Clone)]
+pub struct Task {
+    pub id: TaskId,
+    pub name: String,
+    pub priority: TaskPriority,
+    pub expected_duration: Duration,
+    pub status: TaskStatus,
+}
+
+impl Task {
+    /// Create a new pending task with the given id and name.
+    pub fn new(id: TaskId, name: impl Into<String>, expected_duration: Duration) -> Self {
+        Self {
+            id,
+            name: name.into(),
+            priority: TaskPriority::Normal,
+            expected_duration,
+            status: TaskStatus::Pending,
+        }
+    }
+}

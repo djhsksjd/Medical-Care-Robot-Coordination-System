@@ -28,3 +28,5 @@ Thumbs.db
 *.o
 *.so
 *.dylib
+
+.env_local
