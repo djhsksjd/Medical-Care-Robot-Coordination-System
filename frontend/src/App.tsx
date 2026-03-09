@@ -11,7 +11,7 @@ import type {
 import './style.css';
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/$/, '');
-const SUPPORTED_SCHEDULERS: SchedulerKind[] = ['Fifo'];
+const SUPPORTED_SCHEDULERS: SchedulerKind[] = ['Fifo', 'Priority'];
 
 function apiUrl(path: string): string {
   return `${API_BASE}${path}`;

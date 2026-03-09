@@ -3,10 +3,10 @@
 //! 包括：初始化调度器、预填充 Demo 任务、按 `worker_count` 创建多台 Robot。
 
 use crate::coordinator::lifecycle::Coordinator;
-use crate::scheduler::fifo::FifoScheduler;
+use crate::scheduler::SchedulerStrategy;
 use crate::types::config::Config;
 use crate::types::robot::Robot;
-use crate::types::task::Task;
+use crate::types::task::{Task, TaskPriority};
 use crate::util::id_generator::next_task_id;
 use std::time::Duration;
 
@@ -27,13 +27,18 @@ impl CoordinatorBuilder {
     }
 
     pub fn build(self) -> Coordinator {
-        // Set up a FIFO scheduler and seed it with demo tasks.
-        let mut scheduler = FifoScheduler::new();
+        // Set up the configured scheduler and seed it with demo tasks.
+        let mut scheduler = SchedulerStrategy::new(self.config.scheduler);
 
         // 每个任务模拟执行约 30 秒（用于演示多机器人调度与监控）
         let task_duration = Duration::from_secs(30);
-        for _ in 0..self.config.demo_task_count {
-            let task = Task::new(next_task_id(), "demo-task", task_duration);
+        for index in 0..self.config.demo_task_count {
+            let mut task = Task::new(next_task_id(), format!("demo-task-{index}"), task_duration);
+            task.priority = match index % 3 {
+                0 => TaskPriority::High,
+                1 => TaskPriority::Normal,
+                _ => TaskPriority::Low,
+            };
             scheduler.submit(task);
         }
 

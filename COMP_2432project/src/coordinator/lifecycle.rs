@@ -8,7 +8,7 @@
 
 use crate::monitor::heartbeat::HeartbeatRegistry;
 use crate::monitor::metrics::MetricsRegistry;
-use crate::scheduler::fifo::FifoScheduler;
+use crate::scheduler::SchedulerStrategy;
 use crate::types::config::Config;
 use crate::types::robot::Robot;
 use crate::util::logger::log_info;
@@ -18,12 +18,12 @@ use crate::worker::pool::WorkerPool;
 #[derive(Debug)]
 pub struct Coordinator {
     pub config: Config,
-    pub scheduler: FifoScheduler,
+    pub scheduler: SchedulerStrategy,
     pub robots: Vec<Robot>,
 }
 
 impl Coordinator {
-    pub fn new(config: Config, scheduler: FifoScheduler, robots: Vec<Robot>) -> Self {
+    pub fn new(config: Config, scheduler: SchedulerStrategy, robots: Vec<Robot>) -> Self {
         Self {
             config,
             scheduler,

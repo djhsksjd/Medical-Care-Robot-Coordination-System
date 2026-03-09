@@ -8,14 +8,14 @@
 
 use crate::monitor::heartbeat::HeartbeatRegistry;
 use crate::monitor::metrics::MetricsRegistry;
-use crate::scheduler::fifo::FifoScheduler;
+use crate::scheduler::SchedulerStrategy;
 use crate::types::robot::Robot;
 use crate::worker::robot::RobotWorker;
 
 /// Simple worker pool managing multiple robot workers.
 pub struct WorkerPool<'a> {
     robots: Vec<Robot>,
-    scheduler: &'a mut FifoScheduler,
+    scheduler: &'a mut SchedulerStrategy,
     heartbeats: &'a HeartbeatRegistry,
     metrics: &'a MetricsRegistry,
 }
@@ -23,7 +23,7 @@ pub struct WorkerPool<'a> {
 impl<'a> WorkerPool<'a> {
     pub fn new(
         robots: Vec<Robot>,
-        scheduler: &'a mut FifoScheduler,
+        scheduler: &'a mut SchedulerStrategy,
         heartbeats: &'a HeartbeatRegistry,
         metrics: &'a MetricsRegistry,
     ) -> Self {

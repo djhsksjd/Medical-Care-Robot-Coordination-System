@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 
 use crate::monitor::heartbeat::HeartbeatRegistry;
 use crate::monitor::metrics::MetricsRegistry;
-use crate::scheduler::fifo::FifoScheduler;
+use crate::scheduler::SchedulerStrategy;
 use crate::types::error::{Error, Result};
 use crate::types::robot::Robot;
 use crate::types::task::{Task, TaskStatus};
@@ -23,7 +23,7 @@ use crate::util::logger::log_info;
 pub struct RobotWorker<'a> {
     pub robot: Robot,
     pub state: WorkerState,
-    scheduler: &'a mut FifoScheduler,
+    scheduler: &'a mut SchedulerStrategy,
     heartbeats: &'a HeartbeatRegistry,
     metrics: &'a MetricsRegistry,
 }
@@ -31,7 +31,7 @@ pub struct RobotWorker<'a> {
 impl<'a> RobotWorker<'a> {
     pub fn new(
         robot: Robot,
-        scheduler: &'a mut FifoScheduler,
+        scheduler: &'a mut SchedulerStrategy,
         heartbeats: &'a HeartbeatRegistry,
         metrics: &'a MetricsRegistry,
     ) -> Self {
