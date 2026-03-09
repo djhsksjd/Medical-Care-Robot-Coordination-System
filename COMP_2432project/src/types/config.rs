@@ -1,10 +1,11 @@
 //! Configuration types for tuning the system.
-// Version 1 only exposes a minimal demo configuration.
+// Version 1 now exposes FIFO and priority scheduling choices.
 
-/// Scheduler type for the system. Only `Fifo` is implemented in V1.
+/// Scheduler type for the system.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum SchedulerKind {
     Fifo,
+    Priority,
 }
 
 /// Global configuration used by the coordinator.
