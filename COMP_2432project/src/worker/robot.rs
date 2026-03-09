@@ -2,84 +2,117 @@
 //! Executes tasks on behalf of a robot and reports heartbeats/metrics.
 //!
 //! 可以把 `RobotWorker` 理解成「绑定到某个 CPU 的内核线程」：
-//! - 从调度器里领取 Task（类似进程/线程调度）
-//! - 执行模拟工作负载（sleep）
+//! - 从全局任务队列中阻塞式领取 TaskId
+//! - 通过 TaskTable 查找真实 Task 并更新状态
+//! - 向 ZoneManager 申请 / 释放区域
 //! - 在执行前后上报心跳与统计数据，供监控子系统使用
 
+use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
+use crate::coordinator::task_table::TaskTable;
+use crate::mm::zone_allocator::ZoneManager;
 use crate::monitor::heartbeat::HeartbeatRegistry;
 use crate::monitor::metrics::MetricsRegistry;
-use crate::scheduler::fifo::FifoScheduler;
-use crate::types::error::{Error, Result};
+use crate::scheduler::thread_safe_queue::ThreadSafeTaskQueue;
+use crate::sync::atomic::{AtomicBool, Ordering};
 use crate::types::robot::Robot;
-use crate::types::task::{Task, TaskStatus};
-use crate::worker::state::WorkerState;
+use crate::types::task::TaskId;
 use crate::util::logger::log_info;
 
 /// Worker bound to a single robot instance.
 #[derive(Debug)]
-pub struct RobotWorker<'a> {
+pub struct RobotWorker {
     pub robot: Robot,
-    pub state: WorkerState,
-    scheduler: &'a mut FifoScheduler,
-    heartbeats: &'a HeartbeatRegistry,
-    metrics: &'a MetricsRegistry,
+    task_queue: Arc<ThreadSafeTaskQueue>,
+    task_table: Arc<TaskTable>,
+    zone_manager: Arc<ZoneManager>,
+    heartbeats: Arc<HeartbeatRegistry>,
+    metrics: Arc<MetricsRegistry>,
+    shutdown: Arc<AtomicBool>,
+    pause: Arc<AtomicBool>,
 }
 
-impl<'a> RobotWorker<'a> {
+impl RobotWorker {
     pub fn new(
         robot: Robot,
-        scheduler: &'a mut FifoScheduler,
-        heartbeats: &'a HeartbeatRegistry,
-        metrics: &'a MetricsRegistry,
+        task_queue: Arc<ThreadSafeTaskQueue>,
+        task_table: Arc<TaskTable>,
+        zone_manager: Arc<ZoneManager>,
+        heartbeats: Arc<HeartbeatRegistry>,
+        metrics: Arc<MetricsRegistry>,
+        shutdown: Arc<AtomicBool>,
+        pause: Arc<AtomicBool>,
     ) -> Self {
         Self {
             robot,
-            state: WorkerState::Idle,
-            scheduler,
+            task_queue,
+            task_table,
+            zone_manager,
             heartbeats,
             metrics,
+            shutdown,
+            pause,
         }
     }
 
-    /// Run a single task if available.
-    pub fn run_once(&mut self) -> Result<()> {
-        if !self.state.is_active() {
-            return Err(Error::WorkerStopped);
-        }
+    /// Main worker loop: keep fetching and executing tasks until shutdown or queue is closed.
+    pub fn run(self) {
+        loop {
+            if self.shutdown.load(Ordering::SeqCst) {
+                log_info(format!("Robot {} received shutdown signal", self.robot.id));
+                break;
+            }
 
-        let mut task: Task = self.scheduler.next_task()?;
-        self.state = WorkerState::Busy;
+            if self.pause.load(Ordering::SeqCst) {
+                // 简单的暂停实现：短暂休眠后重试
+                thread::sleep(Duration::from_millis(100));
+                continue;
+            }
+
+            let Some(task_id) = self.task_queue.pop_blocking() else {
+                // Queue closed and empty.
+                log_info(format!(
+                    "Robot {} exiting: task queue closed",
+                    self.robot.id
+                ));
+                break;
+            };
+
+            self.run_single_task(task_id);
+        }
+    }
+
+    fn run_single_task(&self, task_id: TaskId) {
+        // 为任务分配区域，并在 TaskTable 中标记运行状态。
+        let zone_id = self.zone_manager.allocate_for_task(task_id);
+        let expected = self
+            .task_table
+            .start_task(task_id, self.robot.id, zone_id)
+            .unwrap_or_else(|| Duration::from_secs(30));
+
         self.heartbeats.touch(self.robot.id);
 
         log_info(format!(
-            "Robot {} starting task {} ({})",
-            self.robot.id, task.id, task.name
+            "Robot {} starting task {} in zone {}",
+            self.robot.id, task_id, zone_id
         ));
-
-        task.status = TaskStatus::Running;
 
         let start = Instant::now();
         // 按任务声明的执行时间模拟工作负载（约 30s），上限 60s 防止配置错误导致过长阻塞
-        let sleep_secs = task.expected_duration.as_secs().min(60);
+        let sleep_secs = expected.as_secs().min(60);
         thread::sleep(Duration::from_secs(sleep_secs));
         let exec_time = start.elapsed();
 
-        task.status = TaskStatus::Finished;
-        self.state = WorkerState::Idle;
+        self.task_table.set_finished(task_id);
+        self.zone_manager.release_for_task(task_id);
         self.heartbeats.touch(self.robot.id);
         self.metrics.record_completion(self.robot.id, exec_time);
 
         log_info(format!(
             "Robot {} finished task {} in {:?}",
-            self.robot.id, task.id, exec_time
+            self.robot.id, task_id, exec_time
         ));
-        Ok(())
-    }
-
-    pub fn stop(&mut self) {
-        self.state = WorkerState::Stopped;
     }
 }

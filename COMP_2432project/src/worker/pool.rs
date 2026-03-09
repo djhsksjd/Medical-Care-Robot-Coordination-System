@@ -1,61 +1,89 @@
 //! Worker pool and thread management.
-//! For now we provide a simple single-threaded pool that iterates robots.
 //!
-//! 这里相当于一个非常简化的「调度循环」：
-//! - 持有一组逻辑 CPU（Robot）
-//! - 在一个循环里依次让每个 RobotWorker 从调度器里领取任务并执行
-//! - 直到本轮所有 Robot 都拿不到任务（没有进度），认为调度队列已空，循环结束
+//! 在多线程版本中，WorkerPool 会为每个 Robot 启动一个 OS 线程，
+//! 线程内部循环从 `ThreadSafeTaskQueue` 中阻塞式获取任务并执行，直到：
+//! - 任务队列被关闭且为空，或
+//! - 收到全局 shutdown 信号。
 
+use std::sync::Arc;
+use std::thread;
+
+use crate::coordinator::task_table::TaskTable;
+use crate::mm::zone_allocator::ZoneManager;
 use crate::monitor::heartbeat::HeartbeatRegistry;
 use crate::monitor::metrics::MetricsRegistry;
-use crate::scheduler::fifo::FifoScheduler;
+use crate::scheduler::thread_safe_queue::ThreadSafeTaskQueue;
+use crate::sync::atomic::{AtomicBool, Ordering};
 use crate::types::robot::Robot;
 use crate::worker::robot::RobotWorker;
 
-/// Simple worker pool managing multiple robot workers.
-pub struct WorkerPool<'a> {
+/// Worker pool managing multiple robot workers running in parallel threads.
+pub struct WorkerPool {
     robots: Vec<Robot>,
-    scheduler: &'a mut FifoScheduler,
-    heartbeats: &'a HeartbeatRegistry,
-    metrics: &'a MetricsRegistry,
+    task_queue: Arc<ThreadSafeTaskQueue>,
+    task_table: Arc<TaskTable>,
+    zone_manager: Arc<ZoneManager>,
+    heartbeats: Arc<HeartbeatRegistry>,
+    metrics: Arc<MetricsRegistry>,
+    shutdown: Arc<AtomicBool>,
+    pause: Arc<AtomicBool>,
 }
 
-impl<'a> WorkerPool<'a> {
+impl WorkerPool {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         robots: Vec<Robot>,
-        scheduler: &'a mut FifoScheduler,
-        heartbeats: &'a HeartbeatRegistry,
-        metrics: &'a MetricsRegistry,
+        task_queue: Arc<ThreadSafeTaskQueue>,
+        task_table: Arc<TaskTable>,
+        zone_manager: Arc<ZoneManager>,
+        heartbeats: Arc<HeartbeatRegistry>,
+        metrics: Arc<MetricsRegistry>,
+        shutdown: Arc<AtomicBool>,
+        pause: Arc<AtomicBool>,
     ) -> Self {
         Self {
             robots,
-            scheduler,
+            task_queue,
+            task_table,
+            zone_manager,
             heartbeats,
             metrics,
+            shutdown,
+            pause,
         }
     }
 
-    /// Run all workers until the scheduler queue is empty.
-    /// This is a cooperative, single-threaded loop to keep the model simple.
-    pub fn run_until_empty(&mut self) {
-        loop {
-            let mut made_progress = false;
-            for robot in &self.robots {
-                let mut worker = RobotWorker::new(
-                    robot.clone(),
-                    self.scheduler,
-                    self.heartbeats,
-                    self.metrics,
-                );
-                if worker.run_once().is_ok() {
-                    made_progress = true;
-                }
+    /// Spawn one OS thread per robot and block until all workers finish.
+    pub fn run_blocking(&self) {
+        let mut handles = Vec::with_capacity(self.robots.len());
+
+        for robot in &self.robots {
+            let worker = RobotWorker::new(
+                robot.clone(),
+                Arc::clone(&self.task_queue),
+                Arc::clone(&self.task_table),
+                Arc::clone(&self.zone_manager),
+                Arc::clone(&self.heartbeats),
+                Arc::clone(&self.metrics),
+                Arc::clone(&self.shutdown),
+                Arc::clone(&self.pause),
+            );
+
+            let handle = thread::spawn(move || {
+                worker.run();
+            });
+            handles.push(handle);
+        }
+
+        for handle in handles {
+            if let Err(err) = handle.join() {
+                eprintln!("Worker thread panicked: {:?}", err);
             }
-            if !made_progress {
-                break;
-            }
+        }
+
+        // 确保所有工作线程结束后，关闭队列，避免悬挂的阻塞调用。
+        if !self.shutdown.load(Ordering::SeqCst) {
+            self.task_queue.close();
         }
     }
 }
-
-

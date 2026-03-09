@@ -6,9 +6,14 @@
 //! - 在 `run_demo` 中把调度器 + WorkerPool + 监控子系统按顺序串起来
 //! - 对外只暴露一个简单的入口，方便 HTTP API 或 examples 直接调用
 
+use std::sync::Arc;
+
+use crate::coordinator::task_table::TaskTable;
+use crate::mm::zone_allocator::ZoneManager;
 use crate::monitor::heartbeat::HeartbeatRegistry;
 use crate::monitor::metrics::MetricsRegistry;
-use crate::scheduler::fifo::FifoScheduler;
+use crate::scheduler::thread_safe_queue::ThreadSafeTaskQueue;
+use crate::sync::atomic::{AtomicBool, Ordering};
 use crate::types::config::Config;
 use crate::types::robot::Robot;
 use crate::util::logger::log_info;
@@ -18,34 +23,48 @@ use crate::worker::pool::WorkerPool;
 #[derive(Debug)]
 pub struct Coordinator {
     pub config: Config,
-    pub scheduler: FifoScheduler,
     pub robots: Vec<Robot>,
 }
 
 impl Coordinator {
-    pub fn new(config: Config, scheduler: FifoScheduler, robots: Vec<Robot>) -> Self {
+    pub fn new(config: Config, robots: Vec<Robot>) -> Self {
         Self {
             config,
-            scheduler,
             robots,
         }
     }
 
-    /// Run a simple end-to-end demo:
-    /// - Seeded tasks are already in the scheduler (via builder).
-    /// - Workers run tasks until the queue is empty.
-    pub fn run_demo(&mut self, heartbeats: &HeartbeatRegistry, metrics: &MetricsRegistry) {
+    /// Run a simple end-to-end demo with real multi-threaded workers.
+    ///
+    /// - Tasks have been inserted into `task_table` and their IDs pushed into `task_queue`.
+    /// - One OS thread is spawned per robot, all sharing the same registries and zone manager.
+    pub fn run_demo(
+        &mut self,
+        heartbeats: Arc<HeartbeatRegistry>,
+        metrics: Arc<MetricsRegistry>,
+        task_table: Arc<TaskTable>,
+        task_queue: Arc<ThreadSafeTaskQueue>,
+        zone_manager: Arc<ZoneManager>,
+        shutdown: Arc<AtomicBool>,
+        pause: Arc<AtomicBool>,
+    ) {
         log_info("Starting coordinator demo run");
 
-        {
-            let mut pool = WorkerPool::new(
-                self.robots.clone(),
-                &mut self.scheduler,
-                heartbeats,
-                metrics,
-            );
-            pool.run_until_empty();
-        }
+        // 确保标志位处于运行状态。
+        shutdown.store(false, Ordering::SeqCst);
+        pause.store(false, Ordering::SeqCst);
+
+        let pool = WorkerPool::new(
+            self.robots.clone(),
+            task_queue,
+            task_table,
+            zone_manager,
+            heartbeats,
+            metrics,
+            shutdown,
+            pause,
+        );
+        pool.run_blocking();
 
         log_info("Coordinator demo run finished");
     }

@@ -4,6 +4,7 @@
 
 pub mod queue;
 pub mod fifo;
+pub mod thread_safe_queue;
 pub mod priority;
 pub mod round_robin;
 pub mod stats;

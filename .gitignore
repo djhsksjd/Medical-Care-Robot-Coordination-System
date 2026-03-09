@@ -30,3 +30,5 @@ Thumbs.db
 *.dylib
 
 .env_local
+
+/COMP_2432project/tests

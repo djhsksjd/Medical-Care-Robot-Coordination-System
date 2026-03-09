@@ -14,8 +14,13 @@ use axum::{
 use serde::{Deserialize, Serialize};
 
 use crate::coordinator::builder::CoordinatorBuilder;
+use crate::coordinator::task_table::TaskTable;
+use crate::mm::zone_allocator::ZoneManager;
 use crate::monitor::heartbeat::HeartbeatRegistry;
 use crate::monitor::metrics::MetricsRegistry;
+use crate::monitor::monitor_thread::spawn_monitor_thread;
+use crate::scheduler::thread_safe_queue::ThreadSafeTaskQueue;
+use crate::sync::atomic::{AtomicBool, Ordering};
 use crate::monitor::reporter::{build_report, SystemReport};
 use crate::types::config::Config;
 use crate::types::robot::RobotId;
@@ -114,11 +119,17 @@ pub struct SystemState {
     pub system_status: SystemStatus,
 }
 
-#[derive(Debug)]
+#[derive()]
 struct SharedState {
     config: Config,
     heartbeats: Arc<HeartbeatRegistry>,
     metrics: Arc<MetricsRegistry>,
+    task_table: Arc<TaskTable>,
+    task_queue: Arc<ThreadSafeTaskQueue>,
+    zone_manager: Arc<ZoneManager>,
+    worker_shutdown: Arc<AtomicBool>,
+    worker_pause: Arc<AtomicBool>,
+    monitor_shutdown: Arc<AtomicBool>,
     system_status: SystemStatus,
     run_generation: u64,
 }
@@ -131,11 +142,31 @@ pub struct AppState {
 impl AppState {
     pub fn new() -> Self {
         let config = Config::default();
+        let heartbeats = Arc::new(HeartbeatRegistry::new());
+        let metrics = Arc::new(MetricsRegistry::new());
+        let task_table = Arc::new(TaskTable::new());
+        let task_queue = Arc::new(ThreadSafeTaskQueue::new());
+        let zones = vec![
+            crate::types::zone::Zone::new(1, "ICU".to_string(), 2),
+            crate::types::zone::Zone::new(2, "Ward".to_string(), 4),
+            crate::types::zone::Zone::new(3, "OR".to_string(), 1),
+        ];
+        let zone_manager = Arc::new(ZoneManager::new(zones));
+        let worker_shutdown = Arc::new(AtomicBool::new(false));
+        let worker_pause = Arc::new(AtomicBool::new(false));
+        let monitor_shutdown = Arc::new(AtomicBool::new(false));
+
         Self {
             inner: Arc::new(Mutex::new(SharedState {
                 config,
-                heartbeats: Arc::new(HeartbeatRegistry::new()),
-                metrics: Arc::new(MetricsRegistry::new()),
+                heartbeats,
+                metrics,
+                task_table,
+                task_queue,
+                zone_manager,
+                worker_shutdown,
+                worker_pause,
+                monitor_shutdown,
                 system_status: SystemStatus::Stopped,
                 run_generation: 0,
             })),
@@ -202,42 +233,64 @@ async fn get_state(State(app): State<AppState>) -> Json<SystemState> {
         })
         .collect();
 
-    // Build a simple demo task list derived from config and metrics.
-    let demo_count = guard.config.demo_task_count as u64;
-    let completed = throughput.min(demo_count);
-    let tasks: Vec<Task> = (0..demo_count)
-        .map(|id| Task {
-            id,
-            name: format!("demo-task-{id}"),
-            priority: if id % 3 == 0 {
-                TaskPriority::High
-            } else if id % 3 == 1 {
-                TaskPriority::Normal
-            } else {
-                TaskPriority::Low
+    // Build task list from the central TaskTable so we reflect real statuses.
+    let task_snapshots = guard.task_table.all();
+    let tasks: Vec<Task> = task_snapshots
+        .into_iter()
+        .map(|snap| Task {
+            id: snap.task.id,
+            name: snap.task.name.clone(),
+            priority: match snap.task.priority {
+                crate::types::task::TaskPriority::Low => TaskPriority::Low,
+                crate::types::task::TaskPriority::Normal => TaskPriority::Normal,
+                crate::types::task::TaskPriority::High => TaskPriority::High,
             },
-            status: if id < completed {
-                TaskStatus::Finished
-            } else {
-                TaskStatus::Pending
+            status: match snap.task.status {
+                crate::types::task::TaskStatus::Pending => TaskStatus::Pending,
+                crate::types::task::TaskStatus::Running => TaskStatus::Running,
+                crate::types::task::TaskStatus::Finished => TaskStatus::Finished,
             },
-            robot_id: None,
-            zone_id: Some(1),
-            expected_duration_ms: 30_000, // 与后端实际执行时间一致（约 30 秒）
-            started_at: None,
-            finished_at: None,
+            robot_id: snap.robot_id.map(|id| id as u64),
+            zone_id: snap.zone_id.map(|id| id as u64),
+            expected_duration_ms: snap.task.expected_duration.as_secs() as u64 * 1000,
+            started_at: snap
+                .started_at
+                .map(|t| format!("{t:?}")),
+            finished_at: snap
+                .finished_at
+                .map(|t| format!("{t:?}")),
         })
         .collect();
 
-    // Single demo zone derived from config and robot count.
-    let zones: Vec<Zone> = vec![Zone {
-        id: 1,
-        name: "zone-1".to_string(),
-        capacity: demo_count as u32,
-        current_tasks: (demo_count - completed) as u32,
-        active_robots: robots.len() as u32,
-        health: ZoneHealth::Normal,
-    }];
+    // Compute zone statistics based on ZoneManager allocations and task table.
+    let mut zones: Vec<Zone> = Vec::new();
+    for z in guard.zone_manager.zones() {
+        let current_tasks = tasks
+            .iter()
+            .filter(|t| {
+                t.zone_id == Some(z.id)
+                    && matches!(t.status, TaskStatus::Pending | TaskStatus::Running)
+            })
+            .count() as u32;
+
+        // 简单地认为有任务分配到该区域的机器人都是 active。
+        let active_robots = robots.len() as u32;
+
+        let health = if current_tasks > z.capacity {
+            ZoneHealth::HighLoad
+        } else {
+            ZoneHealth::Normal
+        };
+
+        zones.push(Zone {
+            id: z.id,
+            name: z.name.clone(),
+            capacity: z.capacity,
+            current_tasks,
+            active_robots,
+            health,
+        });
+    }
 
     let state = SystemState {
         tasks,
@@ -262,7 +315,12 @@ async fn update_config(
     guard.config = new_config;
     guard.heartbeats = Arc::new(HeartbeatRegistry::new());
     guard.metrics = Arc::new(MetricsRegistry::new());
+    guard.task_table = Arc::new(TaskTable::new());
+    guard.task_queue = Arc::new(ThreadSafeTaskQueue::new());
     guard.system_status = SystemStatus::Stopped;
+    guard.worker_shutdown.store(false, Ordering::SeqCst);
+    guard.worker_pause.store(false, Ordering::SeqCst);
+    guard.monitor_shutdown.store(false, Ordering::SeqCst);
     guard.run_generation += 1;
     StatusCode::NO_CONTENT
 }
@@ -275,16 +333,26 @@ async fn control_system(
     match body.action {
         ControlAction::Start => {
             guard.system_status = SystemStatus::Running;
+            // Start simply clears pause flag; workers will already be running for demo runs.
+            guard.worker_pause.store(false, Ordering::SeqCst);
             StatusCode::NO_CONTENT
         }
         ControlAction::Pause => {
             guard.system_status = SystemStatus::Paused;
+            guard.worker_pause.store(true, Ordering::SeqCst);
             StatusCode::NO_CONTENT
         }
         ControlAction::Stop => {
             guard.run_generation += 1;
+            // Signal shutdown to workers and monitor, and close the task queue to wake any waiters.
+            guard.worker_shutdown.store(true, Ordering::SeqCst);
+            guard.monitor_shutdown.store(true, Ordering::SeqCst);
+            guard.task_queue.close();
+
             guard.heartbeats = Arc::new(HeartbeatRegistry::new());
             guard.metrics = Arc::new(MetricsRegistry::new());
+            guard.task_table = Arc::new(TaskTable::new());
+            guard.task_queue = Arc::new(ThreadSafeTaskQueue::new());
             guard.system_status = SystemStatus::Stopped;
             StatusCode::NO_CONTENT
         }
@@ -294,16 +362,47 @@ async fn control_system(
             guard.system_status = SystemStatus::Running;
             guard.heartbeats = Arc::new(HeartbeatRegistry::new());
             guard.metrics = Arc::new(MetricsRegistry::new());
+            guard.task_table = Arc::new(TaskTable::new());
+            guard.task_queue = Arc::new(ThreadSafeTaskQueue::new());
+            guard.worker_shutdown.store(false, Ordering::SeqCst);
+            guard.worker_pause.store(false, Ordering::SeqCst);
+            guard.monitor_shutdown.store(false, Ordering::SeqCst);
 
             let config = guard.config.clone();
             let heartbeats = Arc::clone(&guard.heartbeats);
             let metrics = Arc::clone(&guard.metrics);
+            let task_table = Arc::clone(&guard.task_table);
+            let task_queue = Arc::clone(&guard.task_queue);
+            let zone_manager = Arc::clone(&guard.zone_manager);
+            let worker_shutdown = Arc::clone(&guard.worker_shutdown);
+            let worker_pause = Arc::clone(&guard.worker_pause);
+            let monitor_shutdown = Arc::clone(&guard.monitor_shutdown);
             let inner = Arc::clone(&app.inner);
             drop(guard);
 
             std::thread::spawn(move || {
-                let mut coord = CoordinatorBuilder::new(config).build();
-                coord.run_demo(heartbeats.as_ref(), metrics.as_ref());
+                let mut coord =
+                    CoordinatorBuilder::new(config).build(&task_table, &task_queue);
+                // 启动监控线程：定期评估健康状态并打印日志。
+                let robot_ids: Vec<RobotId> =
+                    (1..=coord.config.worker_count as u64).collect();
+                spawn_monitor_thread(
+                    Arc::clone(&heartbeats),
+                    Arc::clone(&metrics),
+                    Arc::clone(&monitor_shutdown),
+                    Duration::from_secs(2),
+                    robot_ids,
+                );
+
+                coord.run_demo(
+                    heartbeats,
+                    metrics,
+                    task_table,
+                    task_queue,
+                    zone_manager,
+                    worker_shutdown,
+                    worker_pause,
+                );
 
                 let mut guard = inner.lock().expect("lock poisoned");
                 if guard.run_generation == run_generation {
