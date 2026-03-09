@@ -34,18 +34,15 @@ impl Coordinator {
     /// Run a simple end-to-end demo:
     /// - Seeded tasks are already in the scheduler (via builder).
     /// - Workers run tasks until the queue is empty.
-    pub fn run_demo(mut self) {
+    pub fn run_demo(&mut self, heartbeats: &HeartbeatRegistry, metrics: &MetricsRegistry) {
         log_info("Starting coordinator demo run");
-
-        let heartbeats = HeartbeatRegistry::new();
-        let metrics = MetricsRegistry::new();
 
         {
             let mut pool = WorkerPool::new(
                 self.robots.clone(),
                 &mut self.scheduler,
-                &heartbeats,
-                &metrics,
+                heartbeats,
+                metrics,
             );
             pool.run_until_empty();
         }

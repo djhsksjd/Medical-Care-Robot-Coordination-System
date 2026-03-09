@@ -14,7 +14,6 @@ use axum::{
 use serde::{Deserialize, Serialize};
 
 use crate::coordinator::builder::CoordinatorBuilder;
-use crate::coordinator::lifecycle::Coordinator;
 use crate::monitor::heartbeat::HeartbeatRegistry;
 use crate::monitor::metrics::MetricsRegistry;
 use crate::monitor::reporter::{build_report, SystemReport};
@@ -37,7 +36,7 @@ pub struct Metrics {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "PascalCase")]
 pub enum TaskStatus {
     Pending,
     Running,
@@ -46,7 +45,7 @@ pub enum TaskStatus {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "PascalCase")]
 pub enum TaskPriority {
     Low,
     Normal,
@@ -54,7 +53,7 @@ pub enum TaskPriority {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "PascalCase")]
 pub enum WorkerState {
     Idle,
     Busy,
@@ -72,7 +71,7 @@ pub struct Robot {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "PascalCase")]
 pub enum ZoneHealth {
     Normal,
     HighLoad,
@@ -117,10 +116,11 @@ pub struct SystemState {
 
 #[derive(Debug)]
 struct SharedState {
-    coord: Coordinator,
-    heartbeats: HeartbeatRegistry,
-    metrics: MetricsRegistry,
+    config: Config,
+    heartbeats: Arc<HeartbeatRegistry>,
+    metrics: Arc<MetricsRegistry>,
     system_status: SystemStatus,
+    run_generation: u64,
 }
 
 #[derive(Clone)]
@@ -131,16 +131,13 @@ pub struct AppState {
 impl AppState {
     pub fn new() -> Self {
         let config = Config::default();
-        let builder = CoordinatorBuilder::new(config.clone());
-        let coord = builder.build();
-        let heartbeats = HeartbeatRegistry::new();
-        let metrics = MetricsRegistry::new();
         Self {
             inner: Arc::new(Mutex::new(SharedState {
-                coord,
-                heartbeats,
-                metrics,
+                config,
+                heartbeats: Arc::new(HeartbeatRegistry::new()),
+                metrics: Arc::new(MetricsRegistry::new()),
                 system_status: SystemStatus::Stopped,
+                run_generation: 0,
             })),
         }
     }
@@ -173,9 +170,9 @@ async fn get_state(State(app): State<AppState>) -> Json<SystemState> {
     let hb_timeout = Duration::from_secs(5);
 
     // Build monitoring report for all robots that coordinator knows about.
-    let robot_ids: Vec<RobotId> = guard.coord.robots.iter().map(|r| r.id).collect();
+    let robot_ids: Vec<RobotId> = (1..=guard.config.worker_count as u64).collect();
     let report: SystemReport =
-        build_report(&guard.heartbeats, &guard.metrics, &robot_ids, hb_timeout);
+        build_report(guard.heartbeats.as_ref(), guard.metrics.as_ref(), &robot_ids, hb_timeout);
 
     // Map internal types to API DTO.
     let (throughput, avg_latency_ms) = {
@@ -206,7 +203,7 @@ async fn get_state(State(app): State<AppState>) -> Json<SystemState> {
         .collect();
 
     // Build a simple demo task list derived from config and metrics.
-    let demo_count = guard.coord.config.demo_task_count as u64;
+    let demo_count = guard.config.demo_task_count as u64;
     let completed = throughput.min(demo_count);
     let tasks: Vec<Task> = (0..demo_count)
         .map(|id| Task {
@@ -246,7 +243,7 @@ async fn get_state(State(app): State<AppState>) -> Json<SystemState> {
         tasks,
         robots,
         zones,
-        config: guard.coord.config.clone(),
+        config: guard.config.clone(),
         metrics: Metrics {
             throughput,
             avg_latency_ms,
@@ -262,10 +259,11 @@ async fn update_config(
     Json(new_config): Json<Config>,
 ) -> StatusCode {
     let mut guard = app.inner.lock().expect("lock poisoned");
-    // Rebuild coordinator with new configuration.
-    let builder = CoordinatorBuilder::new(new_config.clone());
-    guard.coord = builder.build();
+    guard.config = new_config;
+    guard.heartbeats = Arc::new(HeartbeatRegistry::new());
+    guard.metrics = Arc::new(MetricsRegistry::new());
     guard.system_status = SystemStatus::Stopped;
+    guard.run_generation += 1;
     StatusCode::NO_CONTENT
 }
 
@@ -277,23 +275,44 @@ async fn control_system(
     match body.action {
         ControlAction::Start => {
             guard.system_status = SystemStatus::Running;
+            StatusCode::NO_CONTENT
         }
         ControlAction::Pause => {
             guard.system_status = SystemStatus::Paused;
+            StatusCode::NO_CONTENT
         }
         ControlAction::Stop => {
+            guard.run_generation += 1;
+            guard.heartbeats = Arc::new(HeartbeatRegistry::new());
+            guard.metrics = Arc::new(MetricsRegistry::new());
             guard.system_status = SystemStatus::Stopped;
+            StatusCode::NO_CONTENT
         }
         ControlAction::RunDemo => {
-            // For now, RunDemo just runs the demo synchronously in-process and
-            // lets monitoring capture the activity.
+            guard.run_generation += 1;
+            let run_generation = guard.run_generation;
             guard.system_status = SystemStatus::Running;
-            let config = guard.coord.config.clone();
-            let coord = std::mem::replace(&mut guard.coord, CoordinatorBuilder::new(config).build());
-            drop(guard); // release lock while running demo
-            coord.run_demo();
+            guard.heartbeats = Arc::new(HeartbeatRegistry::new());
+            guard.metrics = Arc::new(MetricsRegistry::new());
+
+            let config = guard.config.clone();
+            let heartbeats = Arc::clone(&guard.heartbeats);
+            let metrics = Arc::clone(&guard.metrics);
+            let inner = Arc::clone(&app.inner);
+            drop(guard);
+
+            std::thread::spawn(move || {
+                let mut coord = CoordinatorBuilder::new(config).build();
+                coord.run_demo(heartbeats.as_ref(), metrics.as_ref());
+
+                let mut guard = inner.lock().expect("lock poisoned");
+                if guard.run_generation == run_generation {
+                    guard.system_status = SystemStatus::Stopped;
+                }
+            });
+
+            StatusCode::ACCEPTED
         }
     }
-    StatusCode::NO_CONTENT
 }
 

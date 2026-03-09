@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import type {
   SystemState,
   Task,
@@ -10,10 +10,19 @@ import type {
 } from './types';
 import './style.css';
 
-const API_BASE = 'http://localhost:3000';
+const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/$/, '');
+const SUPPORTED_SCHEDULERS: SchedulerKind[] = ['Fifo'];
+
+function apiUrl(path: string): string {
+  return `${API_BASE}${path}`;
+}
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : 'Unknown error';
+}
 
 async function fetchSystemState(): Promise<SystemState> {
-  const res = await fetch(`${API_BASE}/api/state`);
+  const res = await fetch(apiUrl('/api/state'));
   if (!res.ok) {
     throw new Error(`Failed to fetch state: ${res.status}`);
   }
@@ -21,55 +30,74 @@ async function fetchSystemState(): Promise<SystemState> {
 }
 
 async function updateConfig(config: Config): Promise<void> {
-  await fetch(`${API_BASE}/api/config`, {
+  const res = await fetch(apiUrl('/api/config'), {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(config),
   });
+
+  if (!res.ok) {
+    throw new Error(`Failed to update config: ${res.status}`);
+  }
 }
 
 async function controlSystem(action: 'start' | 'pause' | 'stop' | 'run-demo'): Promise<void> {
-  await fetch(`${API_BASE}/api/system/control`, {
+  const res = await fetch(apiUrl('/api/system/control'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ action }),
   });
+
+  if (!res.ok) {
+    throw new Error(`Failed to control system: ${res.status}`);
+  }
 }
 
 const App: React.FC = () => {
   const [state, setState] = useState<SystemState | null>(null);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [busyAction, setBusyAction] = useState<string | null>(null);
   const [configDraft, setConfigDraft] = useState<Config | null>(null);
+  const [isConfigDirty, setIsConfigDirty] = useState(false);
   const [filterStatus, setFilterStatus] = useState<TaskStatus | 'All'>('All');
   const [filterRobotId, setFilterRobotId] = useState<number | 'All'>('All');
   const [filterZoneId, setFilterZoneId] = useState<number | 'All'>('All');
+
+  const refreshState = useCallback(async (): Promise<SystemState | null> => {
+    setLoading(true);
+    try {
+      const data = await fetchSystemState();
+      setState(data);
+      setConfigDraft((current) => (isConfigDirty && current ? current : data.config));
+      setLoadError(null);
+      return data;
+    } catch (error) {
+      setLoadError(getErrorMessage(error));
+      return null;
+    } finally {
+      setLoading(false);
+    }
+  }, [isConfigDirty]);
 
   useEffect(() => {
     let cancelled = false;
 
     const load = async () => {
-      setLoading(true);
-      try {
-        const data = await fetchSystemState();
-        if (!cancelled) {
-          setState(data);
-          setConfigDraft(data.config);
-        }
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
+      const data = await refreshState();
+      if (cancelled || !data) {
+        return;
       }
     };
 
-    load();
+    void load();
     const id = setInterval(load, 2000);
 
     return () => {
       cancelled = true;
       clearInterval(id);
     };
-  }, []);
+  }, [refreshState]);
 
   const filteredTasks: Task[] = useMemo(() => {
     if (!state) return [];
@@ -82,6 +110,19 @@ const App: React.FC = () => {
   }, [state, filterStatus, filterRobotId, filterZoneId]);
 
   if (!state || !configDraft) {
+    if (loadError) {
+      return (
+        <div className="app-loading app-loading-error">
+          <div>
+            <div>Failed to load dashboard: {loadError}</div>
+            <button type="button" onClick={() => void refreshState()}>
+              Retry
+            </button>
+          </div>
+        </div>
+      );
+    }
+
     return <div className="app-loading">Loading dashboard...</div>;
   }
 
@@ -101,7 +142,19 @@ const App: React.FC = () => {
           systemStatus={state.systemStatus}
           metrics={state.metrics}
           loading={loading}
-          onControl={controlSystem}
+          busyAction={busyAction}
+          error={loadError}
+          onControl={async (action) => {
+            setBusyAction(action);
+            try {
+              await controlSystem(action);
+              await refreshState();
+            } catch (error) {
+              setLoadError(getErrorMessage(error));
+            } finally {
+              setBusyAction(null);
+            }
+          }}
         />
         <div className="dashboard-content">
           <div className="dashboard-left">
@@ -112,12 +165,25 @@ const App: React.FC = () => {
             <ZonesPanel zones={state.zones} />
             <ConfigPanel
               config={configDraft}
-              onChange={setConfigDraft}
+              busy={busyAction === 'config'}
+              onChange={(nextConfig) => {
+                setConfigDraft(nextConfig);
+                setIsConfigDirty(true);
+              }}
               onApply={async () => {
-                await updateConfig(configDraft);
-                const refreshed = await fetchSystemState();
-                setState(refreshed);
-                setConfigDraft(refreshed.config);
+                setBusyAction('config');
+                try {
+                  await updateConfig(configDraft);
+                  setIsConfigDirty(false);
+                  const refreshed = await refreshState();
+                  if (refreshed) {
+                    setConfigDraft(refreshed.config);
+                  }
+                } catch (error) {
+                  setLoadError(getErrorMessage(error));
+                } finally {
+                  setBusyAction(null);
+                }
               }}
             />
           </div>
@@ -131,10 +197,12 @@ interface TopBarProps {
   systemStatus: SystemState['systemStatus'];
   metrics: SystemState['metrics'];
   loading: boolean;
-  onControl: (action: 'start' | 'pause' | 'stop' | 'run-demo') => void;
+  busyAction: string | null;
+  error: string | null;
+  onControl: (action: 'start' | 'pause' | 'stop' | 'run-demo') => Promise<void>;
 }
 
-const TopBar: React.FC<TopBarProps> = ({ systemStatus, metrics, loading, onControl }) => {
+const TopBar: React.FC<TopBarProps> = ({ systemStatus, metrics, loading, busyAction, error, onControl }) => {
   const statusColor =
     systemStatus === 'Running'
       ? '#52c41a'
@@ -157,10 +225,19 @@ const TopBar: React.FC<TopBarProps> = ({ systemStatus, metrics, loading, onContr
         <div className="topbar-metrics">
           Throughput: {metrics.throughput} t/s · Avg latency: {metrics.avgLatencyMs} ms
         </div>
-        <button onClick={() => onControl('run-demo')}>Run Demo Once</button>
-        <button onClick={() => onControl('start')}>Start</button>
-        <button onClick={() => onControl('pause')}>Pause</button>
-        <button onClick={() => onControl('stop')}>Stop</button>
+        {error ? <div className="topbar-error">{error}</div> : null}
+        <button disabled={busyAction !== null} onClick={() => void onControl('run-demo')}>
+          {busyAction === 'run-demo' ? 'Running…' : 'Run Demo Once'}
+        </button>
+        <button disabled={busyAction !== null} onClick={() => void onControl('start')}>
+          Start
+        </button>
+        <button disabled={busyAction !== null} onClick={() => void onControl('pause')}>
+          Pause
+        </button>
+        <button disabled={busyAction !== null} onClick={() => void onControl('stop')}>
+          Stop
+        </button>
       </div>
     </div>
   );
@@ -298,7 +375,7 @@ const RobotsPanel: React.FC<RobotsPanelProps> = ({ robots, tasks }) => {
     <div className="panel">
       <div className="section-title">Robots</div>
       {robots.map((r) => {
-        const currentTask = r.currentTaskId ? taskMap.get(r.currentTaskId) : undefined;
+        const currentTask = r.currentTaskId != null ? taskMap.get(r.currentTaskId) : undefined;
         return (
           <div key={r.id} className="robot-card">
             <div className="robot-header">
@@ -359,11 +436,12 @@ const ZonesPanel: React.FC<ZonesPanelProps> = ({ zones }) => {
 
 interface ConfigPanelProps {
   config: Config;
+  busy: boolean;
   onChange: (c: Config) => void;
   onApply: () => void;
 }
 
-const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onChange, onApply }) => {
+const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, busy, onChange, onApply }) => {
   const handleSchedulerChange = (value: SchedulerKind) => {
     onChange({ ...config, scheduler: value });
   };
@@ -381,9 +459,11 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onChange, onApply }) 
             value={config.scheduler}
             onChange={(e) => handleSchedulerChange(e.target.value as SchedulerKind)}
           >
-            <option value="Fifo">Fifo</option>
-            <option value="Priority">Priority (future)</option>
-            <option value="RoundRobin">RoundRobin (future)</option>
+            {SUPPORTED_SCHEDULERS.map((scheduler) => (
+              <option key={scheduler} value={scheduler}>
+                {scheduler}
+              </option>
+            ))}
           </select>
         </label>
         <label>
@@ -404,7 +484,7 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onChange, onApply }) 
             onChange={(e) => onChange({ ...config, demoTaskCount: Number(e.target.value) })}
           />
         </label>
-        <button type="button" onClick={onApply}>
+        <button type="button" disabled={busy} onClick={onApply}>
           Apply &amp; Restart Demo
         </button>
       </div>

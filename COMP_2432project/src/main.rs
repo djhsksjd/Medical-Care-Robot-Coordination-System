@@ -21,14 +21,10 @@ async fn main() {
     let app: Router = build_router(state).layer(cors);
 
     let addr: SocketAddr = "0.0.0.0:3000".parse().expect("valid socket address");
+    let listener = tokio::net::TcpListener::bind(addr)
+        .await
+        .expect("bind server");
     println!("HTTP API server listening on http://{addr}");
 
-    axum::serve(
-        tokio::net::TcpListener::bind(addr)
-            .await
-            .expect("bind server"),
-        app,
-    )
-    .await
-    .expect("serve HTTP");
+    axum::serve(listener, app).await.expect("serve HTTP");
 }

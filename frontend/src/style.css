@@ -39,6 +39,13 @@ button:hover {
   background-color: #eff6ff;
 }
 
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+  border-color: #d1d5db;
+  background-color: #f3f4f6;
+}
+
 button:focus,
 button:focus-visible {
   outline: 2px solid #2563eb;
@@ -52,6 +59,12 @@ button:focus-visible {
   height: 100vh;
   font-size: 1rem;
   color: #4b5563;
+}
+
+.app-loading-error {
+  flex-direction: column;
+  gap: 12px;
+  text-align: center;
 }
 
 .dashboard-root {
@@ -132,12 +145,20 @@ button:focus-visible {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .topbar-metrics {
   font-size: 0.75rem;
   color: #6b7280;
   margin-right: 8px;
+}
+
+.topbar-error {
+  font-size: 0.75rem;
+  color: #dc2626;
+  max-width: 240px;
 }
 
 .dashboard-content {
