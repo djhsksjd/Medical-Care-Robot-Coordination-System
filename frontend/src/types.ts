@@ -45,6 +45,41 @@ export interface Metrics {
   avgLatencyMs: number;
 }
 
+export interface DemoInputTask {
+  id: number;
+  name: string;
+  priority: TaskPriority;
+  expectedDurationMs: number;
+  description: string;
+}
+
+export interface StrategyTaskTiming {
+  taskId: number;
+  taskName: string;
+  priority: TaskPriority;
+  workerId: number;
+  startMs: number;
+  finishMs: number;
+  durationMs: number;
+}
+
+export interface StrategySummary {
+  scheduler: SchedulerKind;
+  makespanMs: number;
+  avgCompletionMs: number;
+  avgWaitMs: number;
+  avgHighPriorityCompletionMs: number;
+  workerBusyMs: number[];
+  speedupVsFifoPct: number;
+  taskTimings: StrategyTaskTiming[];
+}
+
+export interface SchedulingAnalysis {
+  inputTasks: DemoInputTask[];
+  strategies: StrategySummary[];
+  workerCount: number;
+}
+
 export interface SystemState {
   tasks: Task[];
   robots: Robot[];
@@ -52,5 +87,6 @@ export interface SystemState {
   config: Config;
   metrics: Metrics;
   systemStatus: 'Running' | 'Paused' | 'Stopped' | 'Error';
+  schedulingAnalysis: SchedulingAnalysis;
 }
 

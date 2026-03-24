@@ -13,17 +13,19 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::coordinator::builder::CoordinatorBuilder;
+use crate::coordinator::builder::{demo_task_plans, CoordinatorBuilder, DemoTaskPlan};
 use crate::coordinator::task_table::TaskTable;
 use crate::mm::zone_allocator::ZoneManager;
 use crate::monitor::heartbeat::HeartbeatRegistry;
 use crate::monitor::metrics::MetricsRegistry;
 use crate::monitor::monitor_thread::spawn_monitor_thread;
 use crate::scheduler::thread_safe_queue::ThreadSafeTaskQueue;
+use crate::scheduler::SchedulerStrategy;
 use crate::sync::atomic::{AtomicBool, Ordering};
 use crate::monitor::reporter::{build_report, SystemReport};
-use crate::types::config::Config;
+use crate::types::config::{Config, SchedulerKind};
 use crate::types::robot::RobotId;
+use crate::types::task::{Task as CoreTask, TaskPriority as CoreTaskPriority};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum SystemStatus {
@@ -110,6 +112,49 @@ pub struct Task {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct DemoInputTask {
+    pub id: u64,
+    pub name: String,
+    pub priority: TaskPriority,
+    pub expected_duration_ms: u64,
+    pub description: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StrategyTaskTiming {
+    pub task_id: u64,
+    pub task_name: String,
+    pub priority: TaskPriority,
+    pub worker_id: u64,
+    pub start_ms: u64,
+    pub finish_ms: u64,
+    pub duration_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StrategySummary {
+    pub scheduler: SchedulerKind,
+    pub makespan_ms: u64,
+    pub avg_completion_ms: u64,
+    pub avg_wait_ms: u64,
+    pub avg_high_priority_completion_ms: u64,
+    pub worker_busy_ms: Vec<u64>,
+    pub speedup_vs_fifo_pct: f64,
+    pub task_timings: Vec<StrategyTaskTiming>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SchedulingAnalysis {
+    pub input_tasks: Vec<DemoInputTask>,
+    pub strategies: Vec<StrategySummary>,
+    pub worker_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SystemState {
     pub tasks: Vec<Task>,
     pub robots: Vec<Robot>,
@@ -117,6 +162,7 @@ pub struct SystemState {
     pub config: Config,
     pub metrics: Metrics,
     pub system_status: SystemStatus,
+    pub scheduling_analysis: SchedulingAnalysis,
 }
 
 #[derive()]
@@ -199,6 +245,8 @@ pub fn build_router(state: AppState) -> Router {
 async fn get_state(State(app): State<AppState>) -> Json<SystemState> {
     let guard = app.inner.lock().expect("lock poisoned");
     let hb_timeout = Duration::from_secs(5);
+    let demo_plans = demo_task_plans(guard.config.demo_task_count);
+    let scheduling_analysis = build_scheduling_analysis(&demo_plans, guard.config.worker_count);
 
     // Build monitoring report for all robots that coordinator knows about.
     let robot_ids: Vec<RobotId> = (1..=guard.config.worker_count as u64).collect();
@@ -235,7 +283,7 @@ async fn get_state(State(app): State<AppState>) -> Json<SystemState> {
 
     // Build task list from the central TaskTable so we reflect real statuses.
     let task_snapshots = guard.task_table.all();
-    let tasks: Vec<Task> = task_snapshots
+    let mut tasks: Vec<Task> = task_snapshots
         .into_iter()
         .map(|snap| Task {
             id: snap.task.id,
@@ -261,6 +309,7 @@ async fn get_state(State(app): State<AppState>) -> Json<SystemState> {
                 .map(|t| format!("{t:?}")),
         })
         .collect();
+    tasks.sort_by_key(|task| task.id);
 
     // Compute zone statistics based on ZoneManager allocations and task table.
     let mut zones: Vec<Zone> = Vec::new();
@@ -302,9 +351,151 @@ async fn get_state(State(app): State<AppState>) -> Json<SystemState> {
             avg_latency_ms,
         },
         system_status: guard.system_status,
+        scheduling_analysis,
     };
 
     Json(state)
+}
+
+fn map_priority(priority: CoreTaskPriority) -> TaskPriority {
+    match priority {
+        CoreTaskPriority::Low => TaskPriority::Low,
+        CoreTaskPriority::Normal => TaskPriority::Normal,
+        CoreTaskPriority::High => TaskPriority::High,
+    }
+}
+
+fn build_scheduling_analysis(
+    demo_plans: &[DemoTaskPlan],
+    worker_count: usize,
+) -> SchedulingAnalysis {
+    let input_tasks = demo_plans
+        .iter()
+        .map(|plan| DemoInputTask {
+            id: plan.sequence,
+            name: plan.name.clone(),
+            priority: map_priority(plan.priority),
+            expected_duration_ms: plan.expected_duration.as_millis() as u64,
+            description: plan.description.clone(),
+        })
+        .collect::<Vec<_>>();
+
+    let worker_count = worker_count.max(1);
+    let mut strategies = vec![
+        simulate_strategy(SchedulerKind::Fifo, demo_plans, worker_count),
+        simulate_strategy(SchedulerKind::Priority, demo_plans, worker_count),
+    ];
+
+    let fifo_makespan = strategies
+        .iter()
+        .find(|summary| matches!(summary.scheduler, SchedulerKind::Fifo))
+        .map(|summary| summary.makespan_ms)
+        .unwrap_or(0);
+
+    for summary in &mut strategies {
+        summary.speedup_vs_fifo_pct = if fifo_makespan == 0 {
+            0.0
+        } else {
+            ((fifo_makespan as f64 - summary.makespan_ms as f64) / fifo_makespan as f64) * 100.0
+        };
+    }
+
+    SchedulingAnalysis {
+        input_tasks,
+        strategies,
+        worker_count,
+    }
+}
+
+fn simulate_strategy(
+    scheduler_kind: SchedulerKind,
+    demo_plans: &[DemoTaskPlan],
+    worker_count: usize,
+) -> StrategySummary {
+    let mut scheduler = SchedulerStrategy::new(scheduler_kind);
+
+    for plan in demo_plans {
+        let mut task = CoreTask::new(plan.sequence, plan.name.clone(), plan.expected_duration);
+        task.priority = plan.priority;
+        scheduler.submit(task);
+    }
+
+    let mut ordered_tasks = Vec::with_capacity(demo_plans.len());
+    while !scheduler.is_empty() {
+        if let Ok(task) = scheduler.next_task() {
+            ordered_tasks.push(task);
+        }
+    }
+
+    let mut worker_available_ms = vec![0_u64; worker_count.max(1)];
+    let mut worker_busy_ms = vec![0_u64; worker_count.max(1)];
+    let mut task_timings = Vec::with_capacity(ordered_tasks.len());
+    let mut total_completion_ms = 0_u64;
+    let mut total_wait_ms = 0_u64;
+    let mut high_completion_ms = 0_u64;
+    let mut high_count = 0_u64;
+
+    for task in ordered_tasks {
+        let duration_ms = task.expected_duration.as_millis() as u64;
+        let worker_index = worker_available_ms
+            .iter()
+            .enumerate()
+            .min_by_key(|(index, available_at)| (**available_at, *index))
+            .map(|(index, _)| index)
+            .unwrap_or(0);
+
+        let start_ms = worker_available_ms[worker_index];
+        let finish_ms = start_ms + duration_ms;
+        worker_available_ms[worker_index] = finish_ms;
+        worker_busy_ms[worker_index] += duration_ms;
+
+        total_completion_ms += finish_ms;
+        total_wait_ms += start_ms;
+
+        if matches!(task.priority, CoreTaskPriority::High) {
+            high_completion_ms += finish_ms;
+            high_count += 1;
+        }
+
+        task_timings.push(StrategyTaskTiming {
+            task_id: task.id,
+            task_name: task.name,
+            priority: map_priority(task.priority),
+            worker_id: worker_index as u64 + 1,
+            start_ms,
+            finish_ms,
+            duration_ms,
+        });
+    }
+
+    let task_count = task_timings.len() as u64;
+    let makespan_ms = worker_available_ms.into_iter().max().unwrap_or(0);
+    let avg_completion_ms = if task_count == 0 {
+        0
+    } else {
+        total_completion_ms / task_count
+    };
+    let avg_wait_ms = if task_count == 0 {
+        0
+    } else {
+        total_wait_ms / task_count
+    };
+    let avg_high_priority_completion_ms = if high_count == 0 {
+        0
+    } else {
+        high_completion_ms / high_count
+    };
+
+    StrategySummary {
+        scheduler: scheduler_kind,
+        makespan_ms,
+        avg_completion_ms,
+        avg_wait_ms,
+        avg_high_priority_completion_ms,
+        worker_busy_ms,
+        speedup_vs_fifo_pct: 0.0,
+        task_timings,
+    }
 }
 
 async fn update_config(
@@ -412,6 +603,33 @@ async fn control_system(
 
             StatusCode::ACCEPTED
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_scheduling_analysis;
+    use crate::coordinator::builder::demo_task_plans;
+    use crate::types::config::SchedulerKind;
+
+    #[test]
+    fn priority_finishes_urgent_work_faster_than_fifo_on_long_demo_input() {
+        let analysis = build_scheduling_analysis(&demo_task_plans(18), 3);
+        let fifo = analysis
+            .strategies
+            .iter()
+            .find(|summary| matches!(summary.scheduler, SchedulerKind::Fifo))
+            .expect("fifo summary");
+        let priority = analysis
+            .strategies
+            .iter()
+            .find(|summary| matches!(summary.scheduler, SchedulerKind::Priority))
+            .expect("priority summary");
+
+        assert!(
+            priority.avg_high_priority_completion_ms < fifo.avg_high_priority_completion_ms,
+            "priority scheduling should finish urgent tasks sooner"
+        );
     }
 }
 

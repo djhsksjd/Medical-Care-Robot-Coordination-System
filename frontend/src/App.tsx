@@ -7,6 +7,8 @@ import type {
   Config,
   TaskStatus,
   SchedulerKind,
+  DemoInputTask,
+  StrategySummary,
 } from './types';
 import './style.css';
 
@@ -19,6 +21,14 @@ function apiUrl(path: string): string {
 
 function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'Unknown error';
+}
+
+function formatDuration(ms: number): string {
+  if (ms >= 1000) {
+    return `${(ms / 1000).toFixed(ms % 1000 === 0 ? 0 : 1)} s`;
+  }
+
+  return `${ms} ms`;
 }
 
 async function fetchSystemState(): Promise<SystemState> {
@@ -109,6 +119,16 @@ const App: React.FC = () => {
     });
   }, [state, filterStatus, filterRobotId, filterZoneId]);
 
+  const currentStrategySummary = useMemo(
+    () =>
+      state
+        ? state.schedulingAnalysis.strategies.find(
+            (summary) => summary.scheduler === state.config.scheduler,
+          ) ?? state.schedulingAnalysis.strategies[0]
+        : undefined,
+    [state],
+  );
+
   if (!state || !configDraft) {
     if (loadError) {
       return (
@@ -141,6 +161,8 @@ const App: React.FC = () => {
         <TopBar
           systemStatus={state.systemStatus}
           metrics={state.metrics}
+          scheduler={state.config.scheduler}
+          currentStrategySummary={currentStrategySummary}
           loading={loading}
           busyAction={busyAction}
           error={loadError}
@@ -158,11 +180,16 @@ const App: React.FC = () => {
         />
         <div className="dashboard-content">
           <div className="dashboard-left">
+            <StrategyComparisonPanel
+              analysis={state.schedulingAnalysis}
+              currentScheduler={state.config.scheduler}
+            />
             <TaskBoard tasks={filteredTasks} robots={state.robots} zones={state.zones} />
           </div>
           <div className="dashboard-right">
             <RobotsPanel robots={state.robots} tasks={state.tasks} />
             <ZonesPanel zones={state.zones} />
+            <DemoDatasetPanel tasks={state.schedulingAnalysis.inputTasks} />
             <ConfigPanel
               config={configDraft}
               busy={busyAction === 'config'}
@@ -196,13 +223,24 @@ const App: React.FC = () => {
 interface TopBarProps {
   systemStatus: SystemState['systemStatus'];
   metrics: SystemState['metrics'];
+  scheduler: SchedulerKind;
+  currentStrategySummary?: StrategySummary;
   loading: boolean;
   busyAction: string | null;
   error: string | null;
   onControl: (action: 'start' | 'pause' | 'stop' | 'run-demo') => Promise<void>;
 }
 
-const TopBar: React.FC<TopBarProps> = ({ systemStatus, metrics, loading, busyAction, error, onControl }) => {
+const TopBar: React.FC<TopBarProps> = ({
+  systemStatus,
+  metrics,
+  scheduler,
+  currentStrategySummary,
+  loading,
+  busyAction,
+  error,
+  onControl,
+}) => {
   const statusColor =
     systemStatus === 'Running'
       ? '#52c41a'
@@ -223,7 +261,11 @@ const TopBar: React.FC<TopBarProps> = ({ systemStatus, metrics, loading, busyAct
       </div>
       <div className="topbar-right">
         <div className="topbar-metrics">
-          Throughput: {metrics.throughput} t/s · Avg latency: {metrics.avgLatencyMs} ms
+          Live: throughput {metrics.throughput} · avg latency {metrics.avgLatencyMs} ms
+          {' · '}mode {scheduler}
+          {currentStrategySummary
+            ? ` · projected finish ${formatDuration(currentStrategySummary.makespanMs)}`
+            : ''}
         </div>
         {error ? <div className="topbar-error">{error}</div> : null}
         <button disabled={busyAction !== null} onClick={() => void onControl('run-demo')}>
@@ -327,7 +369,7 @@ const TaskBoard: React.FC<TaskBoardProps> = ({ tasks, robots, zones }) => {
   const zoneMap = useMemo(() => new Map(zones.map((z) => [z.id, z])), [zones]);
 
   return (
-    <div>
+    <div className="panel">
       <div className="section-title">Tasks</div>
       <table className="tasks-table">
         <thead>
@@ -359,6 +401,176 @@ const TaskBoard: React.FC<TaskBoardProps> = ({ tasks, robots, zones }) => {
           })}
         </tbody>
       </table>
+    </div>
+  );
+};
+
+interface StrategyComparisonPanelProps {
+  analysis: SystemState['schedulingAnalysis'];
+  currentScheduler: SchedulerKind;
+}
+
+const StrategyComparisonPanel: React.FC<StrategyComparisonPanelProps> = ({
+  analysis,
+  currentScheduler,
+}) => {
+  const maxMakespan = Math.max(...analysis.strategies.map((summary) => summary.makespanMs), 1);
+  const fifo = analysis.strategies.find((summary) => summary.scheduler === 'Fifo');
+  const priority = analysis.strategies.find((summary) => summary.scheduler === 'Priority');
+  const urgentGain =
+    fifo && priority
+      ? fifo.avgHighPriorityCompletionMs - priority.avgHighPriorityCompletionMs
+      : 0;
+
+  return (
+    <div className="panel comparison-panel">
+      <div className="section-title">Scheduling strategy comparison</div>
+      <div className="comparison-summary-line">
+        Built-in long demo input: {analysis.inputTasks.length} tasks across {analysis.workerCount} robots.
+        {urgentGain > 0 ? ` Priority finishes urgent work about ${formatDuration(urgentGain)} sooner on average.` : ''}
+      </div>
+      <div className="comparison-grid">
+        {analysis.strategies.map((summary) => (
+          <StrategyCard
+            key={summary.scheduler}
+            summary={summary}
+            maxMakespan={maxMakespan}
+            workerCount={analysis.workerCount}
+            active={summary.scheduler === currentScheduler}
+          />
+        ))}
+      </div>
+    </div>
+  );
+};
+
+interface StrategyCardProps {
+  summary: StrategySummary;
+  maxMakespan: number;
+  workerCount: number;
+  active: boolean;
+}
+
+const StrategyCard: React.FC<StrategyCardProps> = ({ summary, maxMakespan, workerCount, active }) => {
+  return (
+    <div className={`strategy-card${active ? ' strategy-card-active' : ''}`}>
+      <div className="strategy-card-header">
+        <div>
+          <div className="strategy-name">{summary.scheduler}</div>
+          <div className="strategy-subtitle">
+            {active ? 'Current dashboard mode' : 'Projected comparison mode'}
+          </div>
+        </div>
+        <div className="strategy-badge">
+          {summary.speedupVsFifoPct > 0
+            ? `${summary.speedupVsFifoPct.toFixed(1)}% faster than FIFO`
+            : summary.scheduler === 'Fifo'
+            ? 'Baseline'
+            : `${Math.abs(summary.speedupVsFifoPct).toFixed(1)}% slower than FIFO`}
+        </div>
+      </div>
+
+      <div className="strategy-stats-grid">
+        <MetricPill label="Makespan" value={formatDuration(summary.makespanMs)} />
+        <MetricPill label="Avg completion" value={formatDuration(summary.avgCompletionMs)} />
+        <MetricPill label="Urgent avg finish" value={formatDuration(summary.avgHighPriorityCompletionMs)} />
+        <MetricPill label="Avg wait" value={formatDuration(summary.avgWaitMs)} />
+      </div>
+
+      <div className="timeline-chart">
+        {Array.from({ length: workerCount }, (_, index) => {
+          const workerId = index + 1;
+          const tasks = summary.taskTimings.filter((timing) => timing.workerId === workerId);
+
+          return (
+            <div key={workerId} className="timeline-row">
+              <div className="timeline-label">Robot {workerId}</div>
+              <div className="timeline-track">
+                {tasks.map((timing) => {
+                  const leftPct = (timing.startMs / maxMakespan) * 100;
+                  const widthPct = Math.max((timing.durationMs / maxMakespan) * 100, 4);
+                  const color =
+                    timing.priority === 'High'
+                      ? '#ef4444'
+                      : timing.priority === 'Normal'
+                      ? '#3b82f6'
+                      : '#9ca3af';
+
+                  return (
+                    <div
+                      key={`${summary.scheduler}-${timing.taskId}`}
+                      className="timeline-bar"
+                      style={{ left: `${leftPct}%`, width: `${widthPct}%`, background: color }}
+                      title={`${timing.taskName} · ${timing.priority} · start ${formatDuration(
+                        timing.startMs,
+                      )} · finish ${formatDuration(timing.finishMs)}`}
+                    >
+                      T{timing.taskId}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="worker-loads">
+        {summary.workerBusyMs.map((busy, index) => (
+          <div key={`${summary.scheduler}-load-${index}`} className="worker-load-row">
+            <span>Robot {index + 1}</span>
+            <div className="worker-load-bar">
+              <div
+                className="worker-load-bar-inner"
+                style={{ width: `${summary.makespanMs ? (busy / summary.makespanMs) * 100 : 0}%` }}
+              />
+            </div>
+            <span>{formatDuration(busy)}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+const MetricPill: React.FC<{ label: string; value: string }> = ({ label, value }) => (
+  <div className="metric-pill">
+    <span>{label}</span>
+    <strong>{value}</strong>
+  </div>
+);
+
+const DemoDatasetPanel: React.FC<{ tasks: DemoInputTask[] }> = ({ tasks }) => {
+  return (
+    <div className="panel">
+      <div className="section-title">Explicit long demo input</div>
+      <div className="config-description">
+        This workload is seeded into the backend and also used for the scheduling comparison above.
+      </div>
+      <div className="dataset-table-wrap">
+        <table className="tasks-table dataset-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Task</th>
+              <th>Priority</th>
+              <th>Expected</th>
+              <th>Description</th>
+            </tr>
+          </thead>
+          <tbody>
+            {tasks.map((task) => (
+              <tr key={task.id}>
+                <td>{task.id}</td>
+                <td>{task.name}</td>
+                <td>{task.priority}</td>
+                <td>{formatDuration(task.expectedDurationMs)}</td>
+                <td>{task.description}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 };
