@@ -197,7 +197,7 @@ impl AppState {
         let task_queue = Arc::new(ThreadSafeTaskQueue::new());
         let zones = vec![
             crate::types::zone::Zone::new(1, "ICU".to_string(), 2),
-            crate::types::zone::Zone::new(2, "Ward".to_string(), 4),
+            crate::types::zone::Zone::new(2, "Ward".to_string(), 2),
             crate::types::zone::Zone::new(3, "OR".to_string(), 1),
         ];
         let zone_manager = Arc::new(ZoneManager::new(zones));
@@ -332,21 +332,24 @@ async fn get_state(State(app): State<AppState>) -> Json<SystemState> {
         .collect();
     tasks.sort_by_key(|task| task.id);
 
-    // Compute zone statistics based on ZoneManager allocations and task table.
+    // Compute zone statistics based on live running tasks in each zone.
     let mut zones: Vec<Zone> = Vec::new();
     for z in guard.zone_manager.zones() {
         let current_tasks = tasks
             .iter()
             .filter(|t| {
-                t.zone_id == Some(z.id)
-                    && matches!(t.status, TaskStatus::Pending | TaskStatus::Running)
+                t.zone_id == Some(z.id) && matches!(t.status, TaskStatus::Running)
             })
             .count() as u32;
 
-        // 简单地认为有任务分配到该区域的机器人都是 active。
-        let active_robots = robots.len() as u32;
+        let active_robots = tasks
+            .iter()
+            .filter(|t| t.zone_id == Some(z.id) && matches!(t.status, TaskStatus::Running))
+            .filter_map(|t| t.robot_id)
+            .collect::<std::collections::BTreeSet<_>>()
+            .len() as u32;
 
-        let health = if current_tasks > z.capacity {
+        let health = if current_tasks >= z.capacity {
             ZoneHealth::HighLoad
         } else {
             ZoneHealth::Normal

@@ -1,226 +1,401 @@
-PROJECT BLAZE - EXPLICIT 7-ROBOT LONG INPUT TEST DATA
-=====================================================
+PROJECT BLAZE - 9 ROBOTS / 63 TASKS / STRONG ZONE-WAIT STRESS DEMO INPUT
+==========================================================================
 
 Purpose
 -------
-This file documents a longer demo workload for Project Blaze using 7 robots
-and 42 tasks. It is intended for presentation, testing, and to match the
-backend demo configuration and frontend comparison panel.
+This file defines a stronger presentation / test scenario for Project Blaze.
+It upgrades the previous wait-heavy example from 7 robots / 42 tasks to
+9 robots / 63 tasks, while keeping the same core idea:
+	make robot count larger than the total zone capacity so waiting becomes
+	visible and easy to compare across scheduling strategies.
 
-Assumptions used by this input
-------------------------------
-1. Worker / robot count: 7
-2. Scheduling strategies compared: FIFO and Priority
-3. All tasks are seeded into the scheduler at demo time t = 0 s
-4. Priority strategy is non-preemptive:
-	- High > Normal > Low
-	- FIFO order is preserved inside the same priority band
-5. Task duration is the simulated execution duration
-6. The 42-task dataset is built from the base 18 tasks repeated as workload waves
+This new version is designed to answer the question:
+	"What happens when there are more robots than the total number of zone slots?"
+
+IMPORTANT NOTE
+--------------
+The current backend default zone capacities in code are still:
+	- ICU = 2
+	- Ward = 4
+	- OR = 1
+	- Total slots = 7
+
+To create a true strong waiting-heavy example while keeping the same project
+structure, this TEST INPUT DOCUMENT uses a tighter demo assumption:
+	- ICU = 2
+	- Ward = 2
+	- OR = 1
+	- Total slots = 5
+
+That means:
+	- Robot count = 9
+	- Total concurrent zone slots = 5
+	- Therefore at least 4 robots must wait whenever all zone slots are full.
+
+This file is primarily a documented demo input / report scenario.
+If you want the live backend to reproduce the same pressure exactly, you would
+temporarily reduce Ward capacity from 4 to 2 and raise worker_count to 9 in the
+backend configuration / setup.
 
 
-SECTION A - ROBOT COMING / ONLINE SEQUENCE
-------------------------------------------
+SECTION A - DEMO ASSUMPTIONS
+----------------------------
+1. Worker / robot count: 9
+2. Total tasks: 63
+3. All tasks are seeded at queue time t = 0 s
+4. Zone capacities used for this stress example:
+	- ICU = 2
+	- Ward = 2
+	- OR = 1
+	- Total zone slots = 5
+5. Scheduling strategies compared:
+	- FIFO
+	- Priority
+	- SRT (Shortest Remaining Time style demo ordering)
+	- Round Robin (4 s quantum in the frontend comparison view)
+6. This scenario is designed so that scheduler ordering changes not only finish
+	times, but also how many robots are forced to WAIT for zone capacity.
+
+
+SECTION B - ROBOT ONLINE SEQUENCE
+---------------------------------
 | Sequence | Robot ID | Robot Name | Ready Time | Notes |
 |----------|----------|------------|------------|-------|
-| 1 | 1 | robot-1 | 0 s | Worker online at demo start |
-| 2 | 2 | robot-2 | 0 s | Worker online at demo start |
-| 3 | 3 | robot-3 | 0 s | Worker online at demo start |
-| 4 | 4 | robot-4 | 0 s | Worker online at demo start |
-| 5 | 5 | robot-5 | 0 s | Worker online at demo start |
-| 6 | 6 | robot-6 | 0 s | Worker online at demo start |
-| 7 | 7 | robot-7 | 0 s | Worker online at demo start |
+| 1 | 1 | robot-1 | 0 s | Online at demo start |
+| 2 | 2 | robot-2 | 0 s | Online at demo start |
+| 3 | 3 | robot-3 | 0 s | Online at demo start |
+| 4 | 4 | robot-4 | 0 s | Online at demo start |
+| 5 | 5 | robot-5 | 0 s | Online at demo start |
+| 6 | 6 | robot-6 | 0 s | Online at demo start |
+| 7 | 7 | robot-7 | 0 s | Online at demo start |
+| 8 | 8 | robot-8 | 0 s | Online at demo start |
+| 9 | 9 | robot-9 | 0 s | Online at demo start |
 
 
-SECTION B - TASK INPUT QUEUE DETAILS
-------------------------------------
-All tasks below are inserted at queue time 0 s. Sequence number is the input
-order before any scheduling strategy reorders them.
+SECTION C - WHY THIS INPUT FORCES WAITING
+-----------------------------------------
+Because the total zone capacity is only 5 but there are 9 robots, the system can
+never run more than 5 tasks at the same time in this example.
 
-| Seq | Task ID | Task Name | Priority | Queue Time | Duration | Detail |
-|-----|---------|-----------|----------|------------|----------|--------|
-| 1 | 1 | Emergency ICU medicine delivery | High | 0 s | 4 s | Urgent medication shipment to ICU beds. |
-| 2 | 2 | Bulk linen transfer - west ward | Low | 0 s | 12 s | Large but non-urgent transport workload. |
-| 3 | 3 | STAT blood sample dispatch | High | 0 s | 3 s | Time-sensitive specimen trip to the lab. |
-| 4 | 4 | Waste removal batch A | Low | 0 s | 9 s | Scheduled sanitation pickup with long travel path. |
-| 5 | 5 | Ward meal delivery - north | Normal | 0 s | 5 s | Routine meal drop-off across patient rooms. |
-| 6 | 6 | OR sterilization prep | High | 0 s | 6 s | Pre-op cleaning tools must arrive before surgery starts. |
-| 7 | 7 | Supply restock - pediatrics | Normal | 0 s | 7 s | Restock consumables for the pediatrics station. |
-| 8 | 8 | Deep clean corridor east | Low | 0 s | 14 s | Long-running cleaning route with low urgency. |
-| 9 | 9 | Urgent pharmacy pickup | High | 0 s | 4 s | Prescription needs to reach nurses quickly. |
-| 10 | 10 | Discharge document transport | Normal | 0 s | 5 s | Deliver paperwork to the discharge desk. |
-| 11 | 11 | Lab specimen shuttle | High | 0 s | 3 s | Fast sample handoff before testing window closes. |
-| 12 | 12 | Waste removal batch B | Low | 0 s | 10 s | Second sanitation sweep for the lower floors. |
-| 13 | 13 | Infusion pump delivery | High | 0 s | 4 s | Critical device delivery for patient treatment. |
-| 14 | 14 | UV disinfection - ward 3 | Normal | 0 s | 8 s | Medium-priority hygiene cycle. |
-| 15 | 15 | Laundry return - south wing | Low | 0 s | 9 s | Bulky transport with no immediate deadline. |
-| 16 | 16 | Emergency oxygen cylinder | High | 0 s | 6 s | Urgent respiratory support delivery. |
-| 17 | 17 | Night medicine refill | Normal | 0 s | 7 s | Routine refill before the next medication round. |
-| 18 | 18 | Terminal cleaning - ICU annex | Low | 0 s | 12 s | Long final cleaning sweep for the annex. |
-| 19 | 19 | Emergency ICU medicine delivery (wave 2) | High | 0 s | 4 s | Urgent medication shipment to ICU beds. Repeated workload wave 2. |
-| 20 | 20 | Bulk linen transfer - west ward (wave 2) | Low | 0 s | 12 s | Large but non-urgent transport workload. Repeated workload wave 2. |
-| 21 | 21 | STAT blood sample dispatch (wave 2) | High | 0 s | 3 s | Time-sensitive specimen trip to the lab. Repeated workload wave 2. |
-| 22 | 22 | Waste removal batch A (wave 2) | Low | 0 s | 9 s | Scheduled sanitation pickup with long travel path. Repeated workload wave 2. |
-| 23 | 23 | Ward meal delivery - north (wave 2) | Normal | 0 s | 5 s | Routine meal drop-off across patient rooms. Repeated workload wave 2. |
-| 24 | 24 | OR sterilization prep (wave 2) | High | 0 s | 6 s | Pre-op cleaning tools must arrive before surgery starts. Repeated workload wave 2. |
-| 25 | 25 | Supply restock - pediatrics (wave 2) | Normal | 0 s | 7 s | Restock consumables for the pediatrics station. Repeated workload wave 2. |
-| 26 | 26 | Deep clean corridor east (wave 2) | Low | 0 s | 14 s | Long-running cleaning route with low urgency. Repeated workload wave 2. |
-| 27 | 27 | Urgent pharmacy pickup (wave 2) | High | 0 s | 4 s | Prescription needs to reach nurses quickly. Repeated workload wave 2. |
-| 28 | 28 | Discharge document transport (wave 2) | Normal | 0 s | 5 s | Deliver paperwork to the discharge desk. Repeated workload wave 2. |
-| 29 | 29 | Lab specimen shuttle (wave 2) | High | 0 s | 3 s | Fast sample handoff before testing window closes. Repeated workload wave 2. |
-| 30 | 30 | Waste removal batch B (wave 2) | Low | 0 s | 10 s | Second sanitation sweep for the lower floors. Repeated workload wave 2. |
-| 31 | 31 | Infusion pump delivery (wave 2) | High | 0 s | 4 s | Critical device delivery for patient treatment. Repeated workload wave 2. |
-| 32 | 32 | UV disinfection - ward 3 (wave 2) | Normal | 0 s | 8 s | Medium-priority hygiene cycle. Repeated workload wave 2. |
-| 33 | 33 | Laundry return - south wing (wave 2) | Low | 0 s | 9 s | Bulky transport with no immediate deadline. Repeated workload wave 2. |
-| 34 | 34 | Emergency oxygen cylinder (wave 2) | High | 0 s | 6 s | Urgent respiratory support delivery. Repeated workload wave 2. |
-| 35 | 35 | Night medicine refill (wave 2) | Normal | 0 s | 7 s | Routine refill before the next medication round. Repeated workload wave 2. |
-| 36 | 36 | Terminal cleaning - ICU annex (wave 2) | Low | 0 s | 12 s | Long final cleaning sweep for the annex. Repeated workload wave 2. |
-| 37 | 37 | Emergency ICU medicine delivery (wave 3) | High | 0 s | 4 s | Urgent medication shipment to ICU beds. Repeated workload wave 3. |
-| 38 | 38 | Bulk linen transfer - west ward (wave 3) | Low | 0 s | 12 s | Large but non-urgent transport workload. Repeated workload wave 3. |
-| 39 | 39 | STAT blood sample dispatch (wave 3) | High | 0 s | 3 s | Time-sensitive specimen trip to the lab. Repeated workload wave 3. |
-| 40 | 40 | Waste removal batch A (wave 3) | Low | 0 s | 9 s | Scheduled sanitation pickup with long travel path. Repeated workload wave 3. |
-| 41 | 41 | Ward meal delivery - north (wave 3) | Normal | 0 s | 5 s | Routine meal drop-off across patient rooms. Repeated workload wave 3. |
-| 42 | 42 | OR sterilization prep (wave 3) | High | 0 s | 6 s | Pre-op cleaning tools must arrive before surgery starts. Repeated workload wave 3. |
+So the moment 5 compatible zone slots are occupied:
+	- remaining robots do NOT stop existing as workers,
+	- but they must block and wait at zone allocation,
+	- which makes scheduler ordering much more visible in the demo.
+
+This is exactly the kind of situation where the scheduling policy becomes easy to
+compare and explain.
 
 
-SECTION C - FIFO PROJECTED EXECUTION TIMELINE (7 ROBOTS)
---------------------------------------------------------
-FIFO keeps the original queue order. Tasks are assigned to the earliest free robot.
+SECTION D - TASK INPUT QUEUE (63 TASKS) WITH TARGET ZONES
+---------------------------------------------------------
+All tasks enter the system at t = 0 s.
+The new field "Target Zone" indicates the intended bottlenecked zone for this
+stress example.
 
-| Order | Task ID | Priority | Robot | Start Time | Finish Time | Lasting Time |
-|------|---------|----------|-------|------------|-------------|--------------|
-| 1 | 1 | High | robot-1 | 0 s | 4 s | 4 s |
-| 2 | 2 | Low | robot-2 | 0 s | 12 s | 12 s |
-| 3 | 3 | High | robot-3 | 0 s | 3 s | 3 s |
-| 4 | 4 | Low | robot-4 | 0 s | 9 s | 9 s |
-| 5 | 5 | Normal | robot-5 | 0 s | 5 s | 5 s |
-| 6 | 6 | High | robot-6 | 0 s | 6 s | 6 s |
-| 7 | 7 | Normal | robot-7 | 0 s | 7 s | 7 s |
-| 8 | 8 | Low | robot-3 | 3 s | 17 s | 14 s |
-| 9 | 9 | High | robot-1 | 4 s | 8 s | 4 s |
-| 10 | 10 | Normal | robot-5 | 5 s | 10 s | 5 s |
-| 11 | 11 | High | robot-6 | 6 s | 9 s | 3 s |
-| 12 | 12 | Low | robot-7 | 7 s | 17 s | 10 s |
-| 13 | 13 | High | robot-1 | 8 s | 12 s | 4 s |
-| 14 | 14 | Normal | robot-4 | 9 s | 17 s | 8 s |
-| 15 | 15 | Low | robot-6 | 9 s | 18 s | 9 s |
-| 16 | 16 | High | robot-5 | 10 s | 16 s | 6 s |
-| 17 | 17 | Normal | robot-1 | 12 s | 19 s | 7 s |
-| 18 | 18 | Low | robot-2 | 12 s | 24 s | 12 s |
-| 19 | 19 | High | robot-5 | 16 s | 20 s | 4 s |
-| 20 | 20 | Low | robot-3 | 17 s | 29 s | 12 s |
-| 21 | 21 | High | robot-4 | 17 s | 20 s | 3 s |
-| 22 | 22 | Low | robot-7 | 17 s | 26 s | 9 s |
-| 23 | 23 | Normal | robot-6 | 18 s | 23 s | 5 s |
-| 24 | 24 | High | robot-1 | 19 s | 25 s | 6 s |
-| 25 | 25 | Normal | robot-4 | 20 s | 27 s | 7 s |
-| 26 | 26 | Low | robot-5 | 20 s | 34 s | 14 s |
-| 27 | 27 | High | robot-6 | 23 s | 27 s | 4 s |
-| 28 | 28 | Normal | robot-2 | 24 s | 29 s | 5 s |
-| 29 | 29 | High | robot-1 | 25 s | 28 s | 3 s |
-| 30 | 30 | Low | robot-7 | 26 s | 36 s | 10 s |
-| 31 | 31 | High | robot-4 | 27 s | 31 s | 4 s |
-| 32 | 32 | Normal | robot-6 | 27 s | 35 s | 8 s |
-| 33 | 33 | Low | robot-1 | 28 s | 37 s | 9 s |
-| 34 | 34 | High | robot-2 | 29 s | 35 s | 6 s |
-| 35 | 35 | Normal | robot-3 | 29 s | 36 s | 7 s |
-| 36 | 36 | Low | robot-4 | 31 s | 43 s | 12 s |
-| 37 | 37 | High | robot-5 | 34 s | 38 s | 4 s |
-| 38 | 38 | Low | robot-2 | 35 s | 47 s | 12 s |
-| 39 | 39 | High | robot-6 | 35 s | 38 s | 3 s |
-| 40 | 40 | Low | robot-3 | 36 s | 45 s | 9 s |
-| 41 | 41 | Normal | robot-7 | 36 s | 41 s | 5 s |
-| 42 | 42 | High | robot-1 | 37 s | 43 s | 6 s |
+| Seq | Task ID | Task Name | Priority | Duration | Target Zone | Why it matters |
+|-----|---------|-----------|----------|----------|-------------|----------------|
+| 1 | 1 | Emergency ICU medicine delivery | High | 4 s | ICU | Short urgent ICU job |
+| 2 | 2 | Bulk linen transfer - west ward | Low | 12 s | Ward | Long low-priority Ward slot blocker |
+| 3 | 3 | STAT blood sample dispatch | High | 3 s | OR | Very short urgent OR job |
+| 4 | 4 | Waste removal batch A | Low | 9 s | Ward | Long low-priority Ward blocker |
+| 5 | 5 | Ward meal delivery - north | Normal | 5 s | ICU | Uses scarce ICU slot early |
+| 6 | 6 | OR sterilization prep | High | 6 s | OR | Must wait if OR is occupied |
+| 7 | 7 | Supply restock - pediatrics | Normal | 7 s | ICU | Can be forced to wait at t = 0 |
+| 8 | 8 | Deep clean corridor east | Low | 14 s | ICU | Very long ICU bottleneck task |
+| 9 | 9 | Urgent pharmacy pickup | High | 4 s | ICU | Urgent ICU work behind scarce slots |
+| 10 | 10 | Discharge document transport | Normal | 5 s | Ward | Medium Ward job |
+| 11 | 11 | Lab specimen shuttle | High | 3 s | OR | Short OR urgent task |
+| 12 | 12 | Waste removal batch B | Low | 10 s | Ward | Another long Ward blocker |
+| 13 | 13 | Infusion pump delivery | High | 4 s | ICU | Short urgent ICU job |
+| 14 | 14 | UV disinfection - ward 3 | Normal | 8 s | Ward | Medium Ward occupancy |
+| 15 | 15 | Laundry return - south wing | Low | 9 s | ICU | Long ICU slot blocker |
+| 16 | 16 | Emergency oxygen cylinder | High | 6 s | ICU | Urgent ICU task |
+| 17 | 17 | Night medicine refill | Normal | 7 s | Ward | Medium Ward occupancy |
+| 18 | 18 | Terminal cleaning - ICU annex | Low | 12 s | ICU | Long ICU blocker |
+| 19 | 19 | Emergency ICU medicine delivery (wave 2) | High | 4 s | ICU | Repeated urgent ICU job |
+| 20 | 20 | Bulk linen transfer - west ward (wave 2) | Low | 12 s | Ward | Repeated long Ward blocker |
+| 21 | 21 | STAT blood sample dispatch (wave 2) | High | 3 s | OR | Repeated short OR urgent job |
+| 22 | 22 | Waste removal batch A (wave 2) | Low | 9 s | Ward | Repeated Ward blocker |
+| 23 | 23 | Ward meal delivery - north (wave 2) | Normal | 5 s | ICU | Repeated ICU slot consumer |
+| 24 | 24 | OR sterilization prep (wave 2) | High | 6 s | OR | Repeated OR contention |
+| 25 | 25 | Supply restock - pediatrics (wave 2) | Normal | 7 s | ICU | Repeated ICU contention |
+| 26 | 26 | Deep clean corridor east (wave 2) | Low | 14 s | ICU | Repeated long ICU blocker |
+| 27 | 27 | Urgent pharmacy pickup (wave 2) | High | 4 s | ICU | Repeated urgent ICU job |
+| 28 | 28 | Discharge document transport (wave 2) | Normal | 5 s | Ward | Repeated Ward task |
+| 29 | 29 | Lab specimen shuttle (wave 2) | High | 3 s | OR | Repeated short OR urgent job |
+| 30 | 30 | Waste removal batch B (wave 2) | Low | 10 s | Ward | Repeated long Ward blocker |
+| 31 | 31 | Infusion pump delivery (wave 2) | High | 4 s | ICU | Repeated urgent ICU job |
+| 32 | 32 | UV disinfection - ward 3 (wave 2) | Normal | 8 s | Ward | Repeated Ward occupancy |
+| 33 | 33 | Laundry return - south wing (wave 2) | Low | 9 s | ICU | Repeated ICU blocker |
+| 34 | 34 | Emergency oxygen cylinder (wave 2) | High | 6 s | ICU | Repeated urgent ICU job |
+| 35 | 35 | Night medicine refill (wave 2) | Normal | 7 s | Ward | Repeated Ward task |
+| 36 | 36 | Terminal cleaning - ICU annex (wave 2) | Low | 12 s | ICU | Repeated long ICU blocker |
+| 37 | 37 | Emergency ICU medicine delivery (wave 3) | High | 4 s | ICU | Repeated urgent ICU job |
+| 38 | 38 | Bulk linen transfer - west ward (wave 3) | Low | 12 s | Ward | Repeated long Ward blocker |
+| 39 | 39 | STAT blood sample dispatch (wave 3) | High | 3 s | OR | Repeated short OR urgent job |
+| 40 | 40 | Waste removal batch A (wave 3) | Low | 9 s | Ward | Repeated Ward blocker |
+| 41 | 41 | Ward meal delivery - north (wave 3) | Normal | 5 s | ICU | Repeated ICU slot consumer |
+| 42 | 42 | OR sterilization prep (wave 3) | High | 6 s | OR | Repeated OR contention |
+| 43 | 43 | Supply restock - pediatrics (wave 3) | Normal | 7 s | ICU | Repeated ICU contention |
+| 44 | 44 | Deep clean corridor east (wave 3) | Low | 14 s | ICU | Repeated long ICU blocker |
+| 45 | 45 | Urgent pharmacy pickup (wave 3) | High | 4 s | ICU | Repeated urgent ICU job |
+| 46 | 46 | Discharge document transport (wave 3) | Normal | 5 s | Ward | Repeated Ward task |
+| 47 | 47 | Lab specimen shuttle (wave 3) | High | 3 s | OR | Repeated short OR urgent job |
+| 48 | 48 | Waste removal batch B (wave 3) | Low | 10 s | Ward | Repeated long Ward blocker |
+| 49 | 49 | Infusion pump delivery (wave 3) | High | 4 s | ICU | Repeated urgent ICU job |
+| 50 | 50 | UV disinfection - ward 3 (wave 3) | Normal | 8 s | Ward | Repeated Ward occupancy |
+| 51 | 51 | Laundry return - south wing (wave 3) | Low | 9 s | ICU | Repeated ICU blocker |
+| 52 | 52 | Emergency oxygen cylinder (wave 3) | High | 6 s | ICU | Repeated urgent ICU job |
+| 53 | 53 | Night medicine refill (wave 3) | Normal | 7 s | Ward | Repeated Ward task |
+| 54 | 54 | Terminal cleaning - ICU annex (wave 3) | Low | 12 s | ICU | Repeated long ICU blocker |
+| 55 | 55 | Emergency ICU medicine delivery (wave 4) | High | 4 s | ICU | Fourth-wave urgent ICU job |
+| 56 | 56 | Bulk linen transfer - west ward (wave 4) | Low | 12 s | Ward | Fourth-wave long Ward blocker |
+| 57 | 57 | STAT blood sample dispatch (wave 4) | High | 3 s | OR | Fourth-wave short OR urgent job |
+| 58 | 58 | Waste removal batch A (wave 4) | Low | 9 s | Ward | Fourth-wave Ward blocker |
+| 59 | 59 | Ward meal delivery - north (wave 4) | Normal | 5 s | ICU | Fourth-wave ICU slot consumer |
+| 60 | 60 | OR sterilization prep (wave 4) | High | 6 s | OR | Fourth-wave OR contention |
+| 61 | 61 | Supply restock - pediatrics (wave 4) | Normal | 7 s | ICU | Fourth-wave ICU contention |
+| 62 | 62 | Deep clean corridor east (wave 4) | Low | 14 s | ICU | Fourth-wave long ICU blocker |
+| 63 | 63 | Urgent pharmacy pickup (wave 4) | High | 4 s | ICU | Fourth-wave urgent ICU job |
 
-FIFO summary
-------------
-- Makespan: 47 s
-- Average completion time: 23.95 s
-- Average waiting time: 16.93 s
-- Average finish time for High priority tasks: 21.35 s
+
+SECTION E - IMMEDIATE SATURATION AT t = 0 s
+-------------------------------------------
+Under this stress input, the first dispatch wave is enough to show strong waiting.
+
+Available zone slots at t = 0 s:
+	- ICU: 2 slots
+	- Ward: 2 slots
+	- OR: 1 slot
+	- Total: 5 slots
+
+Robots ready at t = 0 s:
+	- 9 robots
+
+Therefore:
+	- Maximum 5 robots can actually start working immediately
+	- At least 4 robots must wait
 
 
-SECTION D - PRIORITY PROJECTED EXECUTION TIMELINE (7 ROBOTS)
-------------------------------------------------------------
-Priority order used by the backend:
-High tasks first -> Normal tasks -> Low tasks
-Within each band, original FIFO order is kept.
+SECTION F - FIFO WAIT EXAMPLE (EARLY TIMELINE)
+----------------------------------------------
+FIFO preserves the raw input order, so some long low-priority Ward jobs occupy
+capacity before later urgent tasks arrive.
 
-| Dispatch Order | Task ID | Priority | Robot | Start Time | Finish Time | Lasting Time |
-|---------------|---------|----------|-------|------------|-------------|--------------|
-| 1 | 1 | High | robot-1 | 0 s | 4 s | 4 s |
-| 2 | 3 | High | robot-2 | 0 s | 3 s | 3 s |
-| 3 | 6 | High | robot-3 | 0 s | 6 s | 6 s |
-| 4 | 9 | High | robot-4 | 0 s | 4 s | 4 s |
-| 5 | 11 | High | robot-5 | 0 s | 3 s | 3 s |
-| 6 | 13 | High | robot-6 | 0 s | 4 s | 4 s |
-| 7 | 16 | High | robot-7 | 0 s | 6 s | 6 s |
-| 8 | 19 | High | robot-2 | 3 s | 7 s | 4 s |
-| 9 | 21 | High | robot-5 | 3 s | 6 s | 3 s |
-| 10 | 24 | High | robot-1 | 4 s | 10 s | 6 s |
-| 11 | 27 | High | robot-4 | 4 s | 8 s | 4 s |
-| 12 | 29 | High | robot-6 | 4 s | 7 s | 3 s |
-| 13 | 31 | High | robot-3 | 6 s | 10 s | 4 s |
-| 14 | 34 | High | robot-5 | 6 s | 12 s | 6 s |
-| 15 | 37 | High | robot-7 | 6 s | 10 s | 4 s |
-| 16 | 39 | High | robot-2 | 7 s | 10 s | 3 s |
-| 17 | 42 | High | robot-6 | 7 s | 13 s | 6 s |
-| 18 | 5 | Normal | robot-4 | 8 s | 13 s | 5 s |
-| 19 | 7 | Normal | robot-1 | 10 s | 17 s | 7 s |
-| 20 | 10 | Normal | robot-2 | 10 s | 15 s | 5 s |
-| 21 | 14 | Normal | robot-3 | 10 s | 18 s | 8 s |
-| 22 | 17 | Normal | robot-7 | 10 s | 17 s | 7 s |
-| 23 | 23 | Normal | robot-5 | 12 s | 17 s | 5 s |
-| 24 | 25 | Normal | robot-4 | 13 s | 20 s | 7 s |
-| 25 | 28 | Normal | robot-6 | 13 s | 18 s | 5 s |
-| 26 | 32 | Normal | robot-2 | 15 s | 23 s | 8 s |
-| 27 | 35 | Normal | robot-1 | 17 s | 24 s | 7 s |
-| 28 | 41 | Normal | robot-5 | 17 s | 22 s | 5 s |
-| 29 | 2 | Low | robot-7 | 17 s | 29 s | 12 s |
-| 30 | 4 | Low | robot-3 | 18 s | 27 s | 9 s |
-| 31 | 8 | Low | robot-6 | 18 s | 32 s | 14 s |
-| 32 | 12 | Low | robot-4 | 20 s | 30 s | 10 s |
-| 33 | 15 | Low | robot-5 | 22 s | 31 s | 9 s |
-| 34 | 18 | Low | robot-2 | 23 s | 35 s | 12 s |
-| 35 | 20 | Low | robot-1 | 24 s | 36 s | 12 s |
-| 36 | 22 | Low | robot-3 | 27 s | 36 s | 9 s |
-| 37 | 26 | Low | robot-7 | 29 s | 43 s | 14 s |
-| 38 | 30 | Low | robot-4 | 30 s | 40 s | 10 s |
-| 39 | 33 | Low | robot-5 | 31 s | 40 s | 9 s |
-| 40 | 36 | Low | robot-6 | 32 s | 44 s | 12 s |
-| 41 | 38 | Low | robot-2 | 35 s | 47 s | 12 s |
-| 42 | 40 | Low | robot-1 | 36 s | 45 s | 9 s |
+Initial FIFO dispatch order is simply Task 1 to Task 9.
 
-Priority summary
+| Robot | First picked task | Target Zone | t = 0 result |
+|-------|-------------------|-------------|--------------|
+| robot-1 | Task 1 | ICU | Starts immediately (ICU slot 1/2) |
+| robot-2 | Task 2 | Ward | Starts immediately (Ward slot 1/2) |
+| robot-3 | Task 3 | OR | Starts immediately (OR slot 1/1) |
+| robot-4 | Task 4 | Ward | Starts immediately (Ward slot 2/2) |
+| robot-5 | Task 5 | ICU | Starts immediately (ICU slot 2/2) |
+| robot-6 | Task 6 | OR | WAITS because OR is already full |
+| robot-7 | Task 7 | ICU | WAITS because ICU is already full |
+| robot-8 | Task 8 | ICU | WAITS because ICU is already full |
+| robot-9 | Task 9 | ICU | WAITS because ICU is already full |
+
+FIFO early wait chain
+---------------------
+- t = 0 s: 5 robots working, 4 robots waiting
+- t = 3 s: Task 3 finishes, OR opens, robot-6 starts Task 6
+- t = 4 s: Task 1 finishes, ICU opens, robot-7 starts Task 7
+- t = 5 s: Task 5 still running until 5 s, so ICU pressure remains high
+- after ICU frees again, robot-8 and then robot-9 can finally begin
+- Long Ward blockers (Task 2 and Task 4) remain active for 12 s and 9 s,
+  so later Ward work cannot start even though robots may already be free.
+
+FIFO demo message
+-----------------
+FIFO is easy to explain, but it allows long early low-priority jobs to occupy
+critical zone slots, which causes visible waiting for later urgent work.
+
+
+SECTION G - PRIORITY WAIT EXAMPLE (EARLY TIMELINE)
+--------------------------------------------------
+Priority reorders all High tasks before Normal and Low tasks.
+
+That helps urgent completion, but in this stress example it also clusters many
+robots onto the same scarce ICU / OR zones at the same time.
+
+Approximate first Priority queue prefix:
+	1, 3, 6, 9, 11, 13, 16, 19, 21, ...
+
+Zone pattern of that prefix:
+	ICU, OR, OR, ICU, OR, ICU, ICU, ICU, OR
+
+Immediate result at t = 0 s:
+	- ICU can run only 2 of those tasks
+	- OR can run only 1 of those tasks
+	- Ward sits idle at first because almost no early job uses it
+	- So only 3 robots start immediately and 6 robots wait
+
+Priority early wait snapshot
+----------------------------
+| Resource state at t = 0 s | Value |
+|---------------------------|-------|
+| ICU running tasks | 2 / 2 |
+| OR running tasks | 1 / 1 |
+| Ward running tasks | 0 / 2 |
+| Robots actively working | 3 / 9 |
+| Robots waiting on zone capacity | 6 / 9 |
+
+Priority demo message
+---------------------
+Priority usually wins for urgent tasks, but under strong zone bottlenecks it can
+also create a "traffic jam" by concentrating too many workers on the same scarce
+zones at the same time.
+
+
+SECTION H - SRT WAIT EXAMPLE (EARLY TIMELINE)
+---------------------------------------------
+SRT-like ordering pushes the shortest jobs first.
+
+In this workload, the shortest jobs are mostly the 3 s OR jobs and 4 s ICU jobs.
+That means SRT also concentrates early demand on the OR and ICU bottlenecks.
+
+Typical earliest SRT candidates:
+	- Task 3 (OR, 3 s)
+	- Task 11 (OR, 3 s)
+	- Task 21 (OR, 3 s)
+	- Task 29 (OR, 3 s)
+	- Task 39 (OR, 3 s)
+	- then 4 s ICU jobs such as Task 1 / 9 / 13 / 19 / 27 / 31 / 37
+
+Immediate SRT effect
+--------------------
+	- OR fills instantly with one 3 s task
+	- several other OR tasks must wait behind it
+	- ICU fills with short urgent jobs
+	- Ward is underused in the first instant
+
+But after the first few seconds, SRT tends to free bottleneck slots quickly,
+because its earliest zone occupants are short jobs rather than long blockers.
+
+SRT strong-wait takeaway
+------------------------
+	- Initial waiting can be very high because many 3 s / 4 s tasks target OR / ICU
+	- But average completion time may still look best because those short tasks clear
+	  scarce slots faster than FIFO or Priority's long blockers
+
+SRT demo message
 ----------------
-- Makespan: 47 s
-- Average completion time: 20.05 s
-- Average waiting time: 13.02 s
-- Average finish time for High priority tasks: 7.24 s
+SRT may produce high initial waiting at the bottlenecked zones, but it often
+reduces average completion time because short jobs clear those scarce slots fast.
 
 
-SECTION E - WHY THIS 7-ROBOT DEMO IS GOOD FOR PRESENTATION
-----------------------------------------------------------
-1. It uses more robots, so the robot status panel changes more often.
-2. It uses a longer 42-task workload, so the dashboard has enough time to show:
-	- Pending tasks
-	- Running tasks
-	- Finished tasks
-	- Working / Idle / Stopped robot transitions
-3. With 7 robots, FIFO and Priority have the same overall makespan in this dataset (47 s),
-	but Priority still finishes urgent tasks far earlier.
-4. That makes the scheduling tradeoff easy to explain in the demo.
+SECTION I - ROUND ROBIN WAIT EXAMPLE (4 s QUANTUM)
+--------------------------------------------------
+Round Robin starts from arrival order like FIFO, so its first queue wave looks
+similar to FIFO:
+	- 5 robots start immediately
+	- 4 robots wait at t = 0 s
+
+What makes RR different is what happens after long jobs begin occupying scarce
+zones. Instead of letting a long task dominate the visible comparison timeline,
+the demo view slices execution into 4 s chunks.
+
+That means RR is useful for explaining:
+	- fairness,
+	- repeated turn-taking,
+	- and why long zone-heavy jobs do not visually dominate the schedule the same
+	  way they do under plain FIFO.
+
+RR demo message
+---------------
+Round Robin does not remove the zone bottleneck, but it makes the contention more
+balanced and easier to visualize because long jobs are broken into smaller pieces.
 
 
-SECTION F - QUICK CHECK VALUES FOR DEMO / REPORT
+SECTION J - COMPARISON TALKING POINTS FOR A DEMO
 ------------------------------------------------
-- Worker count: 7
-- Total tasks: 42
-- High priority tasks: 17
-- Normal priority tasks: 11
-- Low priority tasks: 14
-- FIFO makespan: 47 s
-- Priority makespan: 47 s
-- FIFO urgent average finish: 21.35 s
-- Priority urgent average finish: 7.24 s
-- Urgent-task improvement under Priority: about 14.11 s earlier on average
+1. FIFO
+	- Starts 5 robots immediately and 4 wait immediately
+	- Long early low-priority jobs can block Ward / ICU capacity
+	- Easy to explain but inefficient for urgent work under bottlenecks
+
+2. Priority
+	- Finishes urgent tasks earlier
+	- But may create the biggest first-second waiting spike, because many urgent
+	  jobs compete for the same scarce ICU / OR capacity at once
+
+3. SRT
+	- Also clusters short jobs into scarce zones at the start
+	- But those jobs finish quickly, so zone slots free sooner
+	- Usually best for average completion time in a congested system
+
+4. Round Robin
+	- Similar initial wait pattern to FIFO
+	- Better fairness / visualization for long tasks
+	- Good for showing turn-taking behavior under contention
+
+
+SECTION K - QUICK NUMBERS TO SAY OUT LOUD IN THE DEMO
+-----------------------------------------------------
+- Robot count: 9
+- Task count: 63
+- Demo zone capacities in this stress file: ICU 2 + Ward 2 + OR 1 = 5
+- Robots greater than total zone slots: yes (9 > 5)
+- Minimum robots that must wait when all zone slots are full: 4
+- FIFO initial wait count: about 4 robots
+- Priority initial wait count: can jump to about 6 robots because urgent jobs
+	cluster on ICU / OR
+- SRT initial wait count: also high at the start, but short jobs free bottleneck
+	slots earlier
+- RR initial wait count: similar to FIFO, but later execution is more visibly fair
+
+Priority counts in the 63-task input
+------------------------------------
+- High priority tasks: 25
+- Normal priority tasks: 17
+- Low priority tasks: 21
+
+Wave structure in the 63-task input
+-----------------------------------
+- Waves 1 to 3 contain the full 18-task base dataset = 54 tasks
+- Wave 4 contributes the first 9 tasks of the base dataset = 9 tasks
+- Total = 54 + 9 = 63 tasks
+
+
+SECTION L - WHY THIS IS A BETTER STRESS INPUT THAN THE OLD ONE
+--------------------------------------------------------------
+The previous 7-robot / 42-task input was useful for showing long workload and
+completion-time differences, but this new 9-robot / 63-task version is much
+stronger because the waiting effect becomes immediate, obvious, and repeatable.
+
+This new stress input is better for demonstrating:
+	- robots waiting for zones,
+	- why queue order matters,
+	- why urgent-first scheduling can help and hurt in different ways,
+	- how more robots can actually increase visible waiting under bottlenecks,
+	- and how different strategies look under real resource contention.
+
+
+SECTION M - SUGGESTED LIVE DEMO SCRIPT
+--------------------------------------
+1. Start by saying: "We now have 9 robots and 63 tasks."
+2. Then say: "But in this stress example the total zone capacity is only 5, so
+	at least 4 robots must wait whenever all zones are full."
+3. Show FIFO first:
+	- easy to understand
+	- 4 robots wait immediately
+	- long low-priority jobs can block later urgent tasks
+4. Show Priority next:
+	- urgent tasks finish earlier
+	- but even more robots may wait immediately because many urgent tasks target ICU / OR
+5. Show SRT next:
+	- shortest jobs clear bottlenecks quickly
+	- good for average completion time
+6. Show RR last:
+	- bottleneck still exists
+	- but long jobs are sliced and fairness is easier to see visually
+
+
+FINAL CHECKLIST FOR THIS INPUT FILE
+-----------------------------------
+- Robot count updated to 9: YES
+- Task count updated to 63: YES
+- Example now guarantees robot waiting: YES
+- Scheduler differences are easier to explain: YES
+- File intended for presentation / test documentation: YES
