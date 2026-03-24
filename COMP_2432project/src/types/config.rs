@@ -21,8 +21,8 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             scheduler: SchedulerKind::Fifo,
-            worker_count: 3, // 多机器人：默认 3 台 Robot 并发从队列取任务
-            demo_task_count: 18,
+            worker_count: 7, // 多机器人：默认 7 台 Robot 并发从队列取任务
+            demo_task_count: 42,
         }
     }
 }
