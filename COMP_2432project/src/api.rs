@@ -2,7 +2,7 @@
 //! - 通过 `AppState` 持有 Coordinator + 监控子系统
 //! - 对外暴露 /api/state, /api/config, /api/system/control 等端点，供前端 Dashboard 调用
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -405,6 +405,7 @@ fn build_scheduling_analysis(
     let mut strategies = vec![
         simulate_strategy(SchedulerKind::Fifo, demo_plans, worker_count),
         simulate_strategy(SchedulerKind::Priority, demo_plans, worker_count),
+        simulate_strategy(SchedulerKind::RoundRobin, demo_plans, worker_count),
         simulate_strategy(SchedulerKind::Srt, demo_plans, worker_count),
     ];
 
@@ -450,6 +451,10 @@ fn simulate_strategy(
     demo_plans: &[DemoTaskPlan],
     worker_count: usize,
 ) -> StrategySummary {
+    if matches!(scheduler_kind, SchedulerKind::RoundRobin) {
+        return simulate_round_robin_strategy(demo_plans, worker_count);
+    }
+
     let mut scheduler = SchedulerStrategy::new(scheduler_kind);
 
     for plan in demo_plans {
@@ -526,6 +531,126 @@ fn simulate_strategy(
 
     StrategySummary {
         scheduler: scheduler_kind,
+        makespan_ms,
+        avg_completion_ms,
+        avg_wait_ms,
+        avg_high_priority_completion_ms,
+        avg_completion_improvement_vs_fifo_ms: 0,
+        avg_high_priority_improvement_vs_fifo_ms: 0,
+        worker_busy_ms,
+        speedup_vs_fifo_pct: 0.0,
+        task_timings,
+    }
+}
+
+fn simulate_round_robin_strategy(
+    demo_plans: &[DemoTaskPlan],
+    worker_count: usize,
+) -> StrategySummary {
+    const QUANTUM_MS: u64 = 4_000;
+
+    #[derive(Debug)]
+    struct RoundRobinTask {
+        id: u64,
+        name: String,
+        priority: CoreTaskPriority,
+        total_duration_ms: u64,
+        remaining_ms: u64,
+    }
+
+    let mut queue: VecDeque<RoundRobinTask> = demo_plans
+        .iter()
+        .map(|plan| RoundRobinTask {
+            id: plan.sequence,
+            name: plan.name.clone(),
+            priority: plan.priority,
+            total_duration_ms: plan.expected_duration.as_millis() as u64,
+            remaining_ms: plan.expected_duration.as_millis() as u64,
+        })
+        .collect();
+
+    let worker_count = worker_count.max(1);
+    let mut worker_available_ms = vec![0_u64; worker_count];
+    let mut worker_busy_ms = vec![0_u64; worker_count];
+    let mut task_timings = Vec::new();
+    let mut completion_ms_by_task = HashMap::with_capacity(demo_plans.len());
+    let mut task_duration_ms = HashMap::with_capacity(demo_plans.len());
+    let mut task_priority = HashMap::with_capacity(demo_plans.len());
+
+    while let Some(mut task) = queue.pop_front() {
+        let worker_index = worker_available_ms
+            .iter()
+            .enumerate()
+            .min_by_key(|(index, available_at)| (**available_at, *index))
+            .map(|(index, _)| index)
+            .unwrap_or(0);
+
+        let start_ms = worker_available_ms[worker_index];
+        let slice_ms = task.remaining_ms.min(QUANTUM_MS);
+        let finish_ms = start_ms + slice_ms;
+
+        worker_available_ms[worker_index] = finish_ms;
+        worker_busy_ms[worker_index] += slice_ms;
+
+        task_duration_ms.insert(task.id, task.total_duration_ms);
+        task_priority.insert(task.id, task.priority);
+
+        task_timings.push(StrategyTaskTiming {
+            task_id: task.id,
+            task_name: task.name.clone(),
+            priority: map_priority(task.priority),
+            worker_id: worker_index as u64 + 1,
+            start_ms,
+            finish_ms,
+            duration_ms: slice_ms,
+        });
+
+        task.remaining_ms -= slice_ms;
+        if task.remaining_ms == 0 {
+            completion_ms_by_task.insert(task.id, finish_ms);
+        } else {
+            queue.push_back(task);
+        }
+    }
+
+    let task_count = completion_ms_by_task.len() as u64;
+    let total_completion_ms = completion_ms_by_task.values().copied().sum::<u64>();
+    let total_wait_ms = completion_ms_by_task
+        .iter()
+        .map(|(task_id, completion_ms)| {
+            completion_ms.saturating_sub(*task_duration_ms.get(task_id).unwrap_or(&0))
+        })
+        .sum::<u64>();
+    let (high_completion_ms, high_count) = completion_ms_by_task.iter().fold(
+        (0_u64, 0_u64),
+        |(sum, count), (task_id, completion_ms)| {
+            if matches!(task_priority.get(task_id), Some(CoreTaskPriority::High)) {
+                (sum + completion_ms, count + 1)
+            } else {
+                (sum, count)
+            }
+        },
+    );
+
+    let makespan_ms = worker_available_ms.into_iter().max().unwrap_or(0);
+    let avg_completion_ms = if task_count == 0 {
+        0
+    } else {
+        total_completion_ms / task_count
+    };
+    let avg_wait_ms = if task_count == 0 {
+        0
+    } else {
+        total_wait_ms / task_count
+    };
+    let avg_high_priority_completion_ms = if high_count == 0 {
+        0
+    } else {
+        high_completion_ms / high_count
+    };
+
+    StrategySummary {
+        scheduler: SchedulerKind::RoundRobin,
         makespan_ms,
         avg_completion_ms,
         avg_wait_ms,
@@ -689,6 +814,21 @@ mod tests {
         assert!(
             srt.avg_completion_ms < fifo.avg_completion_ms,
             "SRT should reduce average completion time compared with FIFO"
+        );
+    }
+
+    #[test]
+    fn round_robin_strategy_is_included_in_analysis() {
+        let analysis = build_scheduling_analysis(&demo_task_plans(18), 3);
+        let round_robin = analysis
+            .strategies
+            .iter()
+            .find(|summary| matches!(summary.scheduler, SchedulerKind::RoundRobin))
+            .expect("round robin summary");
+
+        assert!(
+            round_robin.task_timings.len() > 18,
+            "Round Robin should emit multiple time slices for longer tasks"
         );
     }
 }

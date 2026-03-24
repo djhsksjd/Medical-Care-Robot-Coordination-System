@@ -32,7 +32,7 @@ export interface Zone {
   health: 'Normal' | 'HighLoad' | 'Error';
 }
 
-export type SchedulerKind = 'Fifo' | 'Priority' | 'Srt';
+export type SchedulerKind = 'Fifo' | 'Priority' | 'RoundRobin' | 'Srt';
 
 export interface Config {
   scheduler: SchedulerKind;

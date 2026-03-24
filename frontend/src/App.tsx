@@ -13,7 +13,7 @@ import type {
 import './style.css';
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/$/, '');
-const SUPPORTED_SCHEDULERS: SchedulerKind[] = ['Fifo', 'Priority', 'Srt'];
+const SUPPORTED_SCHEDULERS: SchedulerKind[] = ['Fifo', 'Priority', 'RoundRobin', 'Srt'];
 
 function apiUrl(path: string): string {
   return `${API_BASE}${path}`;
@@ -471,6 +471,7 @@ const StrategyComparisonPanel: React.FC<StrategyComparisonPanelProps> = ({
 }) => {
   const maxMakespan = Math.max(...analysis.strategies.map((summary) => summary.makespanMs), 1);
   const fifo = analysis.strategies.find((summary) => summary.scheduler === 'Fifo');
+  const roundRobin = analysis.strategies.find((summary) => summary.scheduler === 'RoundRobin');
   const nonFifoStrategies = analysis.strategies.filter((summary) => summary.scheduler !== 'Fifo');
 
   return (
@@ -480,6 +481,12 @@ const StrategyComparisonPanel: React.FC<StrategyComparisonPanelProps> = ({
         Built-in long demo input: {analysis.inputTasks.length} tasks across {analysis.workerCount} robots.
         {fifo ? ` FIFO is the baseline for all improvement numbers below.` : ''}
       </div>
+      {roundRobin ? (
+        <div className="comparison-summary-line comparison-summary-line-highlight">
+          Round Robin is included below with its own comparison charts. Long tasks are split into
+          visible time slices so you can compare RR directly against FIFO, Priority, and SRT.
+        </div>
+      ) : null}
       <div className="comparison-improvements">
         {nonFifoStrategies.map((summary) => (
           <div key={`${summary.scheduler}-improvement`} className="comparison-improvement-card">
@@ -493,6 +500,7 @@ const StrategyComparisonPanel: React.FC<StrategyComparisonPanelProps> = ({
           </div>
         ))}
       </div>
+      <StrategyMetricsCharts analysis={analysis} />
       <div className="comparison-grid">
         {analysis.strategies.map((summary) => (
           <StrategyCard
@@ -503,6 +511,91 @@ const StrategyComparisonPanel: React.FC<StrategyComparisonPanelProps> = ({
             active={summary.scheduler === currentScheduler}
           />
         ))}
+      </div>
+    </div>
+  );
+};
+
+const STRATEGY_ACCENT: Record<SchedulerKind, string> = {
+  Fifo: '#64748b',
+  Priority: '#ef4444',
+  RoundRobin: '#8b5cf6',
+  Srt: '#2563eb',
+};
+
+interface StrategyMetricsChartsProps {
+  analysis: SystemState['schedulingAnalysis'];
+}
+
+const StrategyMetricsCharts: React.FC<StrategyMetricsChartsProps> = ({ analysis }) => {
+  return (
+    <div className="comparison-metric-grid">
+      <StrategyMetricChart
+        title="Makespan comparison"
+        subtitle="Lower is better for total finish time."
+        strategies={analysis.strategies}
+        getValue={(summary) => summary.makespanMs}
+      />
+      <StrategyMetricChart
+        title="Average completion comparison"
+        subtitle="Lower is better for average task finish time."
+        strategies={analysis.strategies}
+        getValue={(summary) => summary.avgCompletionMs}
+      />
+      <StrategyMetricChart
+        title="Urgent-task finish comparison"
+        subtitle="Lower is better for high-priority tasks."
+        strategies={analysis.strategies}
+        getValue={(summary) => summary.avgHighPriorityCompletionMs}
+      />
+    </div>
+  );
+};
+
+interface StrategyMetricChartProps {
+  title: string;
+  subtitle: string;
+  strategies: StrategySummary[];
+  getValue: (summary: StrategySummary) => number;
+}
+
+const StrategyMetricChart: React.FC<StrategyMetricChartProps> = ({
+  title,
+  subtitle,
+  strategies,
+  getValue,
+}) => {
+  const maxValue = Math.max(...strategies.map(getValue), 1);
+
+  return (
+    <div className="comparison-metric-card">
+      <div className="comparison-metric-title">{title}</div>
+      <div className="comparison-metric-subtitle">{subtitle}</div>
+      <div className="comparison-metric-rows">
+        {strategies.map((summary) => {
+          const value = getValue(summary);
+          const widthPct = (value / maxValue) * 100;
+          const isRoundRobin = summary.scheduler === 'RoundRobin';
+
+          return (
+            <div
+              key={`${title}-${summary.scheduler}`}
+              className={`comparison-metric-row${isRoundRobin ? ' comparison-metric-row-rr' : ''}`}
+            >
+              <div className="comparison-metric-label-wrap">
+                <span className="comparison-metric-label">{summary.scheduler}</span>
+                {isRoundRobin ? <span className="comparison-metric-tag">RR</span> : null}
+              </div>
+              <div className="comparison-metric-track">
+                <div
+                  className="comparison-metric-bar"
+                  style={{ width: `${widthPct}%`, background: STRATEGY_ACCENT[summary.scheduler] }}
+                />
+              </div>
+              <div className="comparison-metric-value">{formatDuration(value)}</div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -570,7 +663,7 @@ const StrategyCard: React.FC<StrategyCardProps> = ({ summary, maxMakespan, worke
 
                   return (
                     <div
-                      key={`${summary.scheduler}-${timing.taskId}`}
+                      key={`${summary.scheduler}-${timing.taskId}-${timing.startMs}-${timing.finishMs}`}
                       className="timeline-bar"
                       style={{ left: `${leftPct}%`, width: `${widthPct}%`, background: color }}
                       title={`${timing.taskName} · ${timing.priority} · start ${formatDuration(
