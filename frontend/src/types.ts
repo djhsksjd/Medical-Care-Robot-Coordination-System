@@ -32,7 +32,7 @@ export interface Zone {
   health: 'Normal' | 'HighLoad' | 'Error';
 }
 
-export type SchedulerKind = 'Fifo' | 'Priority' | 'RoundRobin';
+export type SchedulerKind = 'Fifo' | 'Priority' | 'Srt';
 
 export interface Config {
   scheduler: SchedulerKind;
@@ -69,6 +69,8 @@ export interface StrategySummary {
   avgCompletionMs: number;
   avgWaitMs: number;
   avgHighPriorityCompletionMs: number;
+  avgCompletionImprovementVsFifoMs: number;
+  avgHighPriorityImprovementVsFifoMs: number;
   workerBusyMs: number[];
   speedupVsFifoPct: number;
   taskTimings: StrategyTaskTiming[];

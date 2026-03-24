@@ -272,6 +272,30 @@ button:focus-visible {
   margin-bottom: 12px;
 }
 
+.comparison-improvements {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.comparison-improvement-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border: 1px solid #dbeafe;
+  background: #f8fbff;
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 0.78rem;
+  color: #334155;
+}
+
+.comparison-improvement-card strong {
+  color: #1d4ed8;
+  font-size: 0.84rem;
+}
+
 .comparison-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));

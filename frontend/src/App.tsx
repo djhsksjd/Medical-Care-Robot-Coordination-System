@@ -13,7 +13,7 @@ import type {
 import './style.css';
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/$/, '');
-const SUPPORTED_SCHEDULERS: SchedulerKind[] = ['Fifo', 'Priority'];
+const SUPPORTED_SCHEDULERS: SchedulerKind[] = ['Fifo', 'Priority', 'Srt'];
 
 function apiUrl(path: string): string {
   return `${API_BASE}${path}`;
@@ -29,6 +29,17 @@ function formatDuration(ms: number): string {
   }
 
   return `${ms} ms`;
+}
+
+function formatDelta(ms: number): string {
+  const absolute = formatDuration(Math.abs(ms));
+  if (ms > 0) {
+    return `${absolute} faster`;
+  }
+  if (ms < 0) {
+    return `${absolute} slower`;
+  }
+  return 'same as FIFO';
 }
 
 function getTaskStateTone(status: TaskStatus): 'blue' | 'grey' | 'red' {
@@ -460,18 +471,27 @@ const StrategyComparisonPanel: React.FC<StrategyComparisonPanelProps> = ({
 }) => {
   const maxMakespan = Math.max(...analysis.strategies.map((summary) => summary.makespanMs), 1);
   const fifo = analysis.strategies.find((summary) => summary.scheduler === 'Fifo');
-  const priority = analysis.strategies.find((summary) => summary.scheduler === 'Priority');
-  const urgentGain =
-    fifo && priority
-      ? fifo.avgHighPriorityCompletionMs - priority.avgHighPriorityCompletionMs
-      : 0;
+  const nonFifoStrategies = analysis.strategies.filter((summary) => summary.scheduler !== 'Fifo');
 
   return (
     <div className="panel comparison-panel">
       <div className="section-title">Scheduling strategy comparison</div>
       <div className="comparison-summary-line">
         Built-in long demo input: {analysis.inputTasks.length} tasks across {analysis.workerCount} robots.
-        {urgentGain > 0 ? ` Priority finishes urgent work about ${formatDuration(urgentGain)} sooner on average.` : ''}
+        {fifo ? ` FIFO is the baseline for all improvement numbers below.` : ''}
+      </div>
+      <div className="comparison-improvements">
+        {nonFifoStrategies.map((summary) => (
+          <div key={`${summary.scheduler}-improvement`} className="comparison-improvement-card">
+            <strong>{summary.scheduler}</strong>
+            <span>Avg completion: {formatDelta(summary.avgCompletionImprovementVsFifoMs)}</span>
+            <span>Urgent tasks: {formatDelta(summary.avgHighPriorityImprovementVsFifoMs)}</span>
+            <span>
+              Makespan: {summary.speedupVsFifoPct >= 0 ? '+' : ''}
+              {summary.speedupVsFifoPct.toFixed(1)}% vs FIFO
+            </span>
+          </div>
+        ))}
       </div>
       <div className="comparison-grid">
         {analysis.strategies.map((summary) => (
@@ -519,6 +539,14 @@ const StrategyCard: React.FC<StrategyCardProps> = ({ summary, maxMakespan, worke
         <MetricPill label="Avg completion" value={formatDuration(summary.avgCompletionMs)} />
         <MetricPill label="Urgent avg finish" value={formatDuration(summary.avgHighPriorityCompletionMs)} />
         <MetricPill label="Avg wait" value={formatDuration(summary.avgWaitMs)} />
+        <MetricPill
+          label="Vs FIFO avg completion"
+          value={formatDelta(summary.avgCompletionImprovementVsFifoMs)}
+        />
+        <MetricPill
+          label="Vs FIFO urgent"
+          value={formatDelta(summary.avgHighPriorityImprovementVsFifoMs)}
+        />
       </div>
 
       <div className="timeline-chart">

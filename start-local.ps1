@@ -14,7 +14,7 @@ function Stop-PortProcess {
                 Stop-Process -Id $_ -Force -ErrorAction Stop
                 Write-Host "Stopped process on port $Port (PID $_)"
             } catch {
-                Write-Warning "Could not stop PID $_ on port $Port: $($_.Exception.Message)"
+                Write-Warning ("Could not stop PID {0} on port {1}: {2}" -f $_, $Port, $_.Exception.Message)
             }
         }
     }

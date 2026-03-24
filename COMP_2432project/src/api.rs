@@ -141,6 +141,8 @@ pub struct StrategySummary {
     pub avg_completion_ms: u64,
     pub avg_wait_ms: u64,
     pub avg_high_priority_completion_ms: u64,
+    pub avg_completion_improvement_vs_fifo_ms: i64,
+    pub avg_high_priority_improvement_vs_fifo_ms: i64,
     pub worker_busy_ms: Vec<u64>,
     pub speedup_vs_fifo_pct: f64,
     pub task_timings: Vec<StrategyTaskTiming>,
@@ -403,12 +405,25 @@ fn build_scheduling_analysis(
     let mut strategies = vec![
         simulate_strategy(SchedulerKind::Fifo, demo_plans, worker_count),
         simulate_strategy(SchedulerKind::Priority, demo_plans, worker_count),
+        simulate_strategy(SchedulerKind::Srt, demo_plans, worker_count),
     ];
 
-    let fifo_makespan = strategies
+    let fifo_summary = strategies
         .iter()
         .find(|summary| matches!(summary.scheduler, SchedulerKind::Fifo))
+        .cloned();
+
+    let fifo_makespan = fifo_summary
+        .as_ref()
         .map(|summary| summary.makespan_ms)
+        .unwrap_or(0);
+    let fifo_avg_completion = fifo_summary
+        .as_ref()
+        .map(|summary| summary.avg_completion_ms)
+        .unwrap_or(0);
+    let fifo_avg_high = fifo_summary
+        .as_ref()
+        .map(|summary| summary.avg_high_priority_completion_ms)
         .unwrap_or(0);
 
     for summary in &mut strategies {
@@ -417,6 +432,10 @@ fn build_scheduling_analysis(
         } else {
             ((fifo_makespan as f64 - summary.makespan_ms as f64) / fifo_makespan as f64) * 100.0
         };
+        summary.avg_completion_improvement_vs_fifo_ms =
+            fifo_avg_completion as i64 - summary.avg_completion_ms as i64;
+        summary.avg_high_priority_improvement_vs_fifo_ms =
+            fifo_avg_high as i64 - summary.avg_high_priority_completion_ms as i64;
     }
 
     SchedulingAnalysis {
@@ -511,6 +530,8 @@ fn simulate_strategy(
         avg_completion_ms,
         avg_wait_ms,
         avg_high_priority_completion_ms,
+        avg_completion_improvement_vs_fifo_ms: 0,
+        avg_high_priority_improvement_vs_fifo_ms: 0,
         worker_busy_ms,
         speedup_vs_fifo_pct: 0.0,
         task_timings,
@@ -648,6 +669,26 @@ mod tests {
         assert!(
             priority.avg_high_priority_completion_ms < fifo.avg_high_priority_completion_ms,
             "priority scheduling should finish urgent tasks sooner"
+        );
+    }
+
+    #[test]
+    fn srt_improves_average_completion_time_over_fifo() {
+        let analysis = build_scheduling_analysis(&demo_task_plans(18), 3);
+        let fifo = analysis
+            .strategies
+            .iter()
+            .find(|summary| matches!(summary.scheduler, SchedulerKind::Fifo))
+            .expect("fifo summary");
+        let srt = analysis
+            .strategies
+            .iter()
+            .find(|summary| matches!(summary.scheduler, SchedulerKind::Srt))
+            .expect("srt summary");
+
+        assert!(
+            srt.avg_completion_ms < fifo.avg_completion_ms,
+            "SRT should reduce average completion time compared with FIFO"
         );
     }
 }

@@ -6,6 +6,8 @@
 pub enum SchedulerKind {
     Fifo,
     Priority,
+    RoundRobin,
+    Srt,
 }
 
 /// Global configuration used by the coordinator.

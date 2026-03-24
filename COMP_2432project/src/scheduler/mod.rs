@@ -7,10 +7,13 @@ pub mod fifo;
 pub mod thread_safe_queue;
 pub mod priority;
 pub mod round_robin;
+pub mod srt;
 pub mod stats;
 
 use crate::scheduler::fifo::FifoScheduler;
 use crate::scheduler::priority::PriorityScheduler;
+use crate::scheduler::round_robin::RoundRobinScheduler;
+use crate::scheduler::srt::SrtScheduler;
 use crate::types::config::SchedulerKind;
 use crate::types::error::Result;
 use crate::types::task::Task;
@@ -21,6 +24,8 @@ use crate::types::task::Task;
 pub enum SchedulerStrategy {
 	Fifo(FifoScheduler),
 	Priority(PriorityScheduler),
+	RoundRobin(RoundRobinScheduler),
+	Srt(SrtScheduler),
 }
 
 impl SchedulerStrategy {
@@ -28,6 +33,8 @@ impl SchedulerStrategy {
 		match kind {
 			SchedulerKind::Fifo => Self::Fifo(FifoScheduler::new()),
 			SchedulerKind::Priority => Self::Priority(PriorityScheduler::new()),
+			SchedulerKind::RoundRobin => Self::RoundRobin(RoundRobinScheduler::new()),
+			SchedulerKind::Srt => Self::Srt(SrtScheduler::new()),
 		}
 	}
 
@@ -35,6 +42,8 @@ impl SchedulerStrategy {
 		match self {
 			Self::Fifo(scheduler) => scheduler.submit(task),
 			Self::Priority(scheduler) => scheduler.submit(task),
+			Self::RoundRobin(scheduler) => scheduler.submit(task),
+			Self::Srt(scheduler) => scheduler.submit(task),
 		}
 	}
 
@@ -42,6 +51,8 @@ impl SchedulerStrategy {
 		match self {
 			Self::Fifo(scheduler) => scheduler.next_task(),
 			Self::Priority(scheduler) => scheduler.next_task(),
+			Self::RoundRobin(scheduler) => scheduler.next_task(),
+			Self::Srt(scheduler) => scheduler.next_task(),
 		}
 	}
 
@@ -49,6 +60,8 @@ impl SchedulerStrategy {
 		match self {
 			Self::Fifo(scheduler) => scheduler.is_empty(),
 			Self::Priority(scheduler) => scheduler.is_empty(),
+			Self::RoundRobin(scheduler) => scheduler.is_empty(),
+			Self::Srt(scheduler) => scheduler.is_empty(),
 		}
 	}
 }
