@@ -2,6 +2,7 @@
 //! - 通过 `AppState` 持有 Coordinator + 监控子系统
 //! - 对外暴露 /api/state, /api/config, /api/system/control 等端点，供前端 Dashboard 调用
 
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -247,6 +248,17 @@ async fn get_state(State(app): State<AppState>) -> Json<SystemState> {
     let hb_timeout = Duration::from_secs(5);
     let demo_plans = demo_task_plans(guard.config.demo_task_count);
     let scheduling_analysis = build_scheduling_analysis(&demo_plans, guard.config.worker_count);
+    let task_snapshots = guard.task_table.all();
+
+    let running_tasks_by_robot: HashMap<RobotId, u64> = task_snapshots
+        .iter()
+        .filter_map(|snap| match (snap.task.status, snap.robot_id) {
+            (crate::types::task::TaskStatus::Running, Some(robot_id)) => {
+                Some((robot_id, snap.task.id))
+            }
+            _ => None,
+        })
+        .collect();
 
     // Build monitoring report for all robots that coordinator knows about.
     let robot_ids: Vec<RobotId> = (1..=guard.config.worker_count as u64).collect();
@@ -269,20 +281,27 @@ async fn get_state(State(app): State<AppState>) -> Json<SystemState> {
         .map(|rr| Robot {
             id: rr.robot_id,
             name: format!("robot-{}", rr.robot_id),
-            state: match rr.health.status {
-                crate::monitor::health_checker::RobotHealthStatus::Healthy => WorkerState::Idle,
-                crate::monitor::health_checker::RobotHealthStatus::Degraded => WorkerState::Busy,
-                crate::monitor::health_checker::RobotHealthStatus::Unreachable => {
-                    WorkerState::Stopped
+            state: if running_tasks_by_robot.contains_key(&rr.robot_id) {
+                WorkerState::Busy
+            } else {
+                match rr.health.status {
+                    crate::monitor::health_checker::RobotHealthStatus::Healthy => {
+                        WorkerState::Idle
+                    }
+                    crate::monitor::health_checker::RobotHealthStatus::Degraded => {
+                        WorkerState::Busy
+                    }
+                    crate::monitor::health_checker::RobotHealthStatus::Unreachable => {
+                        WorkerState::Stopped
+                    }
                 }
             },
-            current_task_id: None,
+            current_task_id: running_tasks_by_robot.get(&rr.robot_id).copied(),
             recent_completed: rr.metrics.completed_tasks,
         })
         .collect();
 
     // Build task list from the central TaskTable so we reflect real statuses.
-    let task_snapshots = guard.task_table.all();
     let mut tasks: Vec<Task> = task_snapshots
         .into_iter()
         .map(|snap| Task {

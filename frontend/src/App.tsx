@@ -31,6 +31,40 @@ function formatDuration(ms: number): string {
   return `${ms} ms`;
 }
 
+function getTaskStateTone(status: TaskStatus): 'blue' | 'grey' | 'red' {
+  switch (status) {
+    case 'Running':
+      return 'blue';
+    case 'Pending':
+      return 'grey';
+    case 'Finished':
+    case 'Failed':
+      return 'red';
+  }
+}
+
+function getRobotStateTone(state: Robot['state']): 'blue' | 'grey' | 'red' {
+  switch (state) {
+    case 'Busy':
+      return 'blue';
+    case 'Idle':
+      return 'grey';
+    case 'Stopped':
+      return 'red';
+  }
+}
+
+function formatRobotState(state: Robot['state']): string {
+  switch (state) {
+    case 'Busy':
+      return 'Working';
+    case 'Idle':
+      return 'Idle';
+    case 'Stopped':
+      return 'Stopped';
+  }
+}
+
 async function fetchSystemState(): Promise<SystemState> {
   const res = await fetch(apiUrl('/api/state'));
   if (!res.ok) {
@@ -371,6 +405,14 @@ const TaskBoard: React.FC<TaskBoardProps> = ({ tasks, robots, zones }) => {
   return (
     <div className="panel">
       <div className="section-title">Tasks</div>
+      <div className="state-legend">
+        <StateBadge label="Running" tone="blue" />
+        <StateBadge label="Pending" tone="grey" />
+        <StateBadge label="Finished" tone="red" />
+        <span className="state-legend-note">
+          Task colors match the demo palette: blue = active, grey = queued, red = finished.
+        </span>
+      </div>
       <table className="tasks-table">
         <thead>
           <tr>
@@ -392,7 +434,9 @@ const TaskBoard: React.FC<TaskBoardProps> = ({ tasks, robots, zones }) => {
                 <td>{t.id}</td>
                 <td>{t.name}</td>
                 <td>{t.priority}</td>
-                <td>{t.status}</td>
+                <td>
+                  <StateBadge label={t.status} tone={getTaskStateTone(t.status)} />
+                </td>
                 <td>{r ? r.name : '-'}</td>
                 <td>{z ? z.name : '-'}</td>
                 <td>{t.expectedDurationMs}</td>
@@ -540,6 +584,11 @@ const MetricPill: React.FC<{ label: string; value: string }> = ({ label, value }
   </div>
 );
 
+const StateBadge: React.FC<{ label: string; tone: 'blue' | 'grey' | 'red' }> = ({
+  label,
+  tone,
+}) => <span className={`state-badge state-badge-${tone}`}>{label}</span>;
+
 const DemoDatasetPanel: React.FC<{ tasks: DemoInputTask[] }> = ({ tasks }) => {
   return (
     <div className="panel">
@@ -586,12 +635,21 @@ const RobotsPanel: React.FC<RobotsPanelProps> = ({ robots, tasks }) => {
   return (
     <div className="panel">
       <div className="section-title">Robots</div>
+      <div className="state-legend">
+        <StateBadge label="Working" tone="blue" />
+        <StateBadge label="Idle" tone="grey" />
+        <StateBadge label="Stopped" tone="red" />
+        <span className="state-legend-note">
+          Robot colors mirror task states to show the scheduler relationship clearly.
+        </span>
+      </div>
       {robots.map((r) => {
         const currentTask = r.currentTaskId != null ? taskMap.get(r.currentTaskId) : undefined;
         return (
           <div key={r.id} className="robot-card">
             <div className="robot-header">
-              {r.name} (#{r.id}) – {r.state}
+              {r.name} (#{r.id}){' '}
+              <StateBadge label={formatRobotState(r.state)} tone={getRobotStateTone(r.state)} />
             </div>
             <div className="robot-sub">
               Current task:{' '}
