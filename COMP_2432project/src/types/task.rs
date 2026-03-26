@@ -3,6 +3,8 @@
 
 use std::time::Duration;
 
+use crate::types::zone::ZoneId;
+
 /// Unique identifier for a task.
 pub type TaskId = u64;
 
@@ -30,6 +32,9 @@ pub struct Task {
     pub priority: TaskPriority,
     pub expected_duration: Duration,
     pub status: TaskStatus,
+    /// When set, the task can only execute in this specific zone.
+    /// The robot will block until capacity is available in this zone.
+    pub required_zone: Option<ZoneId>,
 }
 
 impl Task {
@@ -41,6 +46,7 @@ impl Task {
             priority: TaskPriority::Normal,
             expected_duration,
             status: TaskStatus::Pending,
+            required_zone: None,
         }
     }
 }

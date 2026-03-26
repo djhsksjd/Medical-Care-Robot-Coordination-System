@@ -85,8 +85,8 @@ impl RobotWorker {
     }
 
     fn run_single_task(&self, task_id: TaskId) {
-        // 为任务分配区域，并在 TaskTable 中标记运行状态。
-        let zone_id = self.zone_manager.allocate_for_task(task_id);
+        let required_zone = self.task_table.required_zone(task_id);
+        let zone_id = self.zone_manager.allocate_for_task(task_id, required_zone);
         let expected = self
             .task_table
             .start_task(task_id, self.robot.id, zone_id)

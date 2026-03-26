@@ -110,6 +110,12 @@ impl TaskTable {
             .collect()
     }
 
+    /// Look up the required zone for a task (if any).
+    pub fn required_zone(&self, id: TaskId) -> Option<ZoneId> {
+        let inner = self.inner.lock().expect("task table lock");
+        inner.get(&id).and_then(|e| e.task.required_zone)
+    }
+
     /// Remove all tasks (used when resetting the system).
     pub fn clear(&self) {
         let mut inner = self.inner.lock().expect("task table lock");

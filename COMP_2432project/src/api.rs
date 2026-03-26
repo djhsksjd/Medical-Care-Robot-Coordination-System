@@ -106,6 +106,7 @@ pub struct Task {
     pub status: TaskStatus,
     pub robot_id: Option<u64>,
     pub zone_id: Option<u64>,
+    pub required_zone_id: Option<u64>,
     pub expected_duration_ms: u64,
     pub started_at: Option<String>,
     pub finished_at: Option<String>,
@@ -119,6 +120,7 @@ pub struct DemoInputTask {
     pub priority: TaskPriority,
     pub expected_duration_ms: u64,
     pub description: String,
+    pub required_zone_id: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -321,6 +323,7 @@ async fn get_state(State(app): State<AppState>) -> Json<SystemState> {
             },
             robot_id: snap.robot_id.map(|id| id as u64),
             zone_id: snap.zone_id.map(|id| id as u64),
+            required_zone_id: snap.task.required_zone,
             expected_duration_ms: snap.task.expected_duration.as_secs() as u64 * 1000,
             started_at: snap
                 .started_at
@@ -401,6 +404,7 @@ fn build_scheduling_analysis(
             priority: map_priority(plan.priority),
             expected_duration_ms: plan.expected_duration.as_millis() as u64,
             description: plan.description.clone(),
+            required_zone_id: plan.required_zone,
         })
         .collect::<Vec<_>>();
 

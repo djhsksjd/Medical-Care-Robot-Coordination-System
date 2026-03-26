@@ -9,6 +9,7 @@ use crate::scheduler::SchedulerStrategy;
 use crate::types::config::Config;
 use crate::types::robot::Robot;
 use crate::types::task::{Task, TaskPriority};
+use crate::types::zone::ZoneId;
 use crate::util::id_generator::next_task_id;
 use std::time::Duration;
 
@@ -19,6 +20,7 @@ pub struct DemoTaskPlan {
     pub priority: TaskPriority,
     pub expected_duration: Duration,
     pub description: String,
+    pub required_zone: Option<ZoneId>,
 }
 
 const BASE_DEMO_TASKS: [(&str, TaskPriority, u64, &str); 18] = [
@@ -155,6 +157,7 @@ pub fn demo_task_plans(count: usize) -> Vec<DemoTaskPlan> {
                 } else {
                     format!("{description} Repeated workload wave {}.", cycle + 1)
                 },
+                required_zone: None,
             }
         })
         .collect()
@@ -194,6 +197,7 @@ impl CoordinatorBuilder {
         for plan in demo_task_plans(self.config.demo_task_count) {
             let mut task = Task::new(next_task_id(), plan.name, plan.expected_duration);
             task.priority = plan.priority;
+            task.required_zone = plan.required_zone;
 
             // Insert into the central task table so lifecycle / API can observe
             // real per-task state and timestamps.
