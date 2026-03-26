@@ -6,8 +6,8 @@
 //! - reporter：面向 API / 前端生成易消费的报告结构
 //! - monitor_thread：后台监控线程，定期评估健康状态并打印日志
 
-pub mod heartbeat;
 pub mod health_checker;
-pub mod reporter;
+pub mod heartbeat;
 pub mod metrics;
 pub mod monitor_thread;
+pub mod reporter;

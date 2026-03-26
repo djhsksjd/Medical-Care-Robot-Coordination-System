@@ -20,6 +20,7 @@ use crate::sync::atomic::{AtomicBool, Ordering};
 use crate::types::robot::Robot;
 use crate::types::task::TaskId;
 use crate::util::logger::log_info;
+use crate::worker::lifecycle::PauseController;
 
 /// Worker bound to a single robot instance.
 #[derive(Debug)]
@@ -31,7 +32,7 @@ pub struct RobotWorker {
     heartbeats: Arc<HeartbeatRegistry>,
     metrics: Arc<MetricsRegistry>,
     shutdown: Arc<AtomicBool>,
-    pause: Arc<AtomicBool>,
+    pause: Arc<PauseController>,
 }
 
 impl RobotWorker {
@@ -43,7 +44,7 @@ impl RobotWorker {
         heartbeats: Arc<HeartbeatRegistry>,
         metrics: Arc<MetricsRegistry>,
         shutdown: Arc<AtomicBool>,
-        pause: Arc<AtomicBool>,
+        pause: Arc<PauseController>,
     ) -> Self {
         Self {
             robot,
@@ -65,9 +66,8 @@ impl RobotWorker {
                 break;
             }
 
-            if self.pause.load(Ordering::SeqCst) {
-                // 简单的暂停实现：短暂休眠后重试
-                thread::sleep(Duration::from_millis(100));
+            if self.pause.is_paused() {
+                self.pause.wait_while_paused();
                 continue;
             }
 
@@ -86,17 +86,28 @@ impl RobotWorker {
 
     fn run_single_task(&self, task_id: TaskId) {
         let required_zone = self.task_table.required_zone(task_id);
-        let zone_id = self.zone_manager.allocate_for_task(task_id, required_zone);
+        let lease = match self.zone_manager.lease_for_task(task_id, required_zone) {
+            Ok(lease) => lease,
+            Err(err) => {
+                log_info(format!(
+                    "Robot {} failed to allocate zone for task {}: {err}",
+                    self.robot.id, task_id
+                ));
+                self.task_table.set_failed(task_id);
+                return;
+            }
+        };
+
         let expected = self
             .task_table
-            .start_task(task_id, self.robot.id, zone_id)
+            .start_task(task_id, self.robot.id, lease.zone_id)
             .unwrap_or_else(|| Duration::from_secs(30));
 
         self.heartbeats.touch(self.robot.id);
 
         log_info(format!(
             "Robot {} starting task {} in zone {}",
-            self.robot.id, task_id, zone_id
+            self.robot.id, task_id, lease.zone_id
         ));
 
         let start = Instant::now();
@@ -106,7 +117,7 @@ impl RobotWorker {
         let exec_time = start.elapsed();
 
         self.task_table.set_finished(task_id);
-        self.zone_manager.release_for_task(task_id);
+        lease.release();
         self.heartbeats.touch(self.robot.id);
         self.metrics.record_completion(self.robot.id, exec_time);
 

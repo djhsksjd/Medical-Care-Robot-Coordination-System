@@ -25,13 +25,16 @@ pub fn spawn_monitor_thread(
 ) {
     thread::spawn(move || {
         while !shutdown.load(Ordering::SeqCst) {
-            let report =
-                build_report(heartbeats.as_ref(), metrics.as_ref(), &robot_ids, Duration::from_secs(5));
+            let report = build_report(
+                heartbeats.as_ref(),
+                metrics.as_ref(),
+                &robot_ids,
+                Duration::from_secs(5),
+            );
 
             log_info(format!(
                 "Monitor snapshot: system={:?}, completed_tasks={}",
-                report.health.status,
-                report.global_metrics.completed_tasks
+                report.health.status, report.global_metrics.completed_tasks
             ));
 
             thread::sleep(interval);
@@ -40,4 +43,3 @@ pub fn spawn_monitor_thread(
         log_info("Monitor thread exiting due to shutdown signal");
     });
 }
-

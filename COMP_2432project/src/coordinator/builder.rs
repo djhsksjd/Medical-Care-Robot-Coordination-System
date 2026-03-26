@@ -4,8 +4,8 @@
 
 use crate::coordinator::lifecycle::Coordinator;
 use crate::coordinator::task_table::TaskTable;
-use crate::scheduler::thread_safe_queue::ThreadSafeTaskQueue;
 use crate::scheduler::SchedulerStrategy;
+use crate::scheduler::thread_safe_queue::ThreadSafeTaskQueue;
 use crate::types::config::Config;
 use crate::types::robot::Robot;
 use crate::types::task::{Task, TaskPriority};
@@ -141,7 +141,8 @@ pub fn demo_task_plans(count: usize) -> Vec<DemoTaskPlan> {
         .map(|index| {
             let sequence = index as u64 + 1;
             let cycle = index / BASE_DEMO_TASKS.len();
-            let (name, priority, duration_secs, description) = BASE_DEMO_TASKS[index % BASE_DEMO_TASKS.len()];
+            let (name, priority, duration_secs, description) =
+                BASE_DEMO_TASKS[index % BASE_DEMO_TASKS.len()];
 
             DemoTaskPlan {
                 sequence,
@@ -186,11 +187,7 @@ impl CoordinatorBuilder {
     /// - The resulting ordering is then pushed into the shared `task_queue`
     ///   that workers consume from.
     /// - All task metadata is stored in `task_table` for API and monitoring.
-    pub fn build(
-        self,
-        task_table: &TaskTable,
-        task_queue: &ThreadSafeTaskQueue,
-    ) -> Coordinator {
+    pub fn build(self, task_table: &TaskTable, task_queue: &ThreadSafeTaskQueue) -> Coordinator {
         // Set up the configured scheduler and seed it with demo tasks.
         let mut scheduler = SchedulerStrategy::new(self.config.scheduler);
 

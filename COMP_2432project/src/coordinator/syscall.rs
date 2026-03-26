@@ -10,6 +10,7 @@ use crate::monitor::heartbeat::HeartbeatRegistry;
 use crate::monitor::metrics::MetricsRegistry;
 use crate::scheduler::thread_safe_queue::ThreadSafeTaskQueue;
 use crate::sync::atomic::AtomicBool;
+use crate::worker::lifecycle::PauseController;
 
 /// Run the built-in demo scenario through the coordinator.
 pub fn run_demo(
@@ -20,7 +21,7 @@ pub fn run_demo(
     task_queue: Arc<ThreadSafeTaskQueue>,
     zone_manager: Arc<ZoneManager>,
     shutdown: Arc<AtomicBool>,
-    pause: Arc<AtomicBool>,
+    pause: Arc<PauseController>,
 ) {
     coordinator.run_demo(
         heartbeats,

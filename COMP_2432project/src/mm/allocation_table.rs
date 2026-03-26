@@ -44,5 +44,3 @@ impl AllocationTable {
         inner.clear();
     }
 }
-
-

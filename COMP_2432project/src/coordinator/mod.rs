@@ -2,6 +2,6 @@
 //! Coordinate scheduling, workers, and monitoring into a cohesive system.
 
 pub mod builder;
-pub mod syscall;
 pub mod lifecycle;
+pub mod syscall;
 pub mod task_table;

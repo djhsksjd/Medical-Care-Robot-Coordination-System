@@ -58,12 +58,7 @@ impl TaskTable {
 
     /// Mark a task as running on a specific robot and zone.
     /// Returns the expected duration of the task if it exists.
-    pub fn start_task(
-        &self,
-        id: TaskId,
-        robot_id: RobotId,
-        zone_id: ZoneId,
-    ) -> Option<Duration> {
+    pub fn start_task(&self, id: TaskId, robot_id: RobotId, zone_id: ZoneId) -> Option<Duration> {
         let mut inner = self.inner.lock().expect("task table lock");
         let entry = inner.get_mut(&id)?;
         entry.task.status = TaskStatus::Running;
@@ -95,6 +90,15 @@ impl TaskTable {
         }
     }
 
+    /// Mark a task as failed and record its finish time.
+    pub fn set_failed(&self, id: TaskId) {
+        let mut inner = self.inner.lock().expect("task table lock");
+        if let Some(entry) = inner.get_mut(&id) {
+            entry.task.status = TaskStatus::Failed;
+            entry.finished_at = Some(SystemTime::now());
+        }
+    }
+
     /// Return a snapshot of all tasks and their timestamps.
     pub fn all(&self) -> Vec<TaskSnapshot> {
         let inner = self.inner.lock().expect("task table lock");
@@ -122,4 +126,3 @@ impl TaskTable {
         inner.clear();
     }
 }
-

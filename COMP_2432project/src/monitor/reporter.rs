@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
-use crate::monitor::health_checker::{evaluate_health, RobotHealth, SystemHealth};
+use crate::monitor::health_checker::{RobotHealth, SystemHealth, evaluate_health};
 use crate::monitor::heartbeat::HeartbeatRegistry;
 use crate::monitor::metrics::{GlobalMetrics, MetricsRegistry, RobotMetrics};
 use crate::types::robot::RobotId;
@@ -41,10 +41,7 @@ pub fn build_report(
     let per_robot_map: HashMap<RobotId, RobotMetrics> = per_robot;
 
     for rh in &health.robots {
-        let rm = per_robot_map
-            .get(&rh.robot_id)
-            .cloned()
-            .unwrap_or_default();
+        let rm = per_robot_map.get(&rh.robot_id).cloned().unwrap_or_default();
         robots.push(RobotReport {
             robot_id: rh.robot_id,
             health: rh.clone(),
@@ -58,4 +55,3 @@ pub fn build_report(
         robots,
     }
 }
-

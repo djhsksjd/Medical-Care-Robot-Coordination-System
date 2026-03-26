@@ -6,6 +6,7 @@ use std::sync::Condvar;
 
 use crate::mm::allocation_table::AllocationTable;
 use crate::sync::mutex::Mutex;
+use crate::types::error::{Error, Result};
 use crate::types::task::TaskId;
 use crate::types::zone::{Zone, ZoneId};
 
@@ -45,8 +46,14 @@ impl ZoneManager {
     ///
     /// When `required_zone` is `None`, zones are tried in round-robin order and
     /// the call blocks only when **all** zones are full.
-    pub fn allocate_for_task(&self, task_id: TaskId, required_zone: Option<ZoneId>) -> ZoneId {
-        assert!(!self.zones.is_empty(), "zone manager requires at least one zone");
+    pub fn allocate_for_task(
+        &self,
+        task_id: TaskId,
+        required_zone: Option<ZoneId>,
+    ) -> Result<ZoneId> {
+        if self.zones.is_empty() {
+            return Err(Error::ZoneUnavailable);
+        }
 
         let mut state = self.state.lock().expect("zone manager lock");
 
@@ -58,10 +65,12 @@ impl ZoneManager {
                         state.active_counts.insert(zone.id, active + 1);
                         drop(state);
                         self.allocations.assign(task_id, zone.id);
-                        return zone.id;
+                        return Ok(zone.id);
                     }
                 } else {
-                    panic!("required_zone {} does not exist in zone manager", target_id);
+                    return Err(Error::Other(format!(
+                        "required_zone {target_id} does not exist in zone manager"
+                    )));
                 }
             } else {
                 let zone_count = self.zones.len();
@@ -78,7 +87,7 @@ impl ZoneManager {
                         drop(state);
 
                         self.allocations.assign(task_id, zone.id);
-                        return zone.id;
+                        return Ok(zone.id);
                     }
                 }
             }
@@ -88,6 +97,21 @@ impl ZoneManager {
                 .wait(state)
                 .expect("zone manager condvar wait");
         }
+    }
+
+    /// Acquire a zone lease for a task. The lease releases automatically on drop.
+    pub fn lease_for_task(
+        self: &std::sync::Arc<Self>,
+        task_id: TaskId,
+        required_zone: Option<ZoneId>,
+    ) -> Result<ZoneLease> {
+        let zone_id = self.allocate_for_task(task_id, required_zone)?;
+        Ok(ZoneLease {
+            manager: std::sync::Arc::clone(self),
+            task_id,
+            zone_id,
+            released: false,
+        })
     }
 
     pub fn release_for_task(&self, task_id: TaskId) {
@@ -123,10 +147,36 @@ impl ZoneManager {
     }
 }
 
+#[derive(Debug)]
+pub struct ZoneLease {
+    manager: std::sync::Arc<ZoneManager>,
+    task_id: TaskId,
+    pub zone_id: ZoneId,
+    released: bool,
+}
+
+impl ZoneLease {
+    pub fn release(mut self) {
+        if !self.released {
+            self.manager.release_for_task(self.task_id);
+            self.released = true;
+        }
+    }
+}
+
+impl Drop for ZoneLease {
+    fn drop(&mut self) {
+        if !self.released {
+            self.manager.release_for_task(self.task_id);
+            self.released = true;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use std::sync::mpsc;
     use std::sync::Arc;
+    use std::sync::mpsc;
     use std::thread;
     use std::time::Duration;
 
@@ -135,13 +185,10 @@ mod tests {
 
     #[test]
     fn uses_another_zone_when_first_choice_is_full() {
-        let manager = ZoneManager::new(vec![
-            Zone::new(1, "ICU", 1),
-            Zone::new(2, "Ward", 1),
-        ]);
+        let manager = ZoneManager::new(vec![Zone::new(1, "ICU", 1), Zone::new(2, "Ward", 1)]);
 
-        let first = manager.allocate_for_task(1, None);
-        let second = manager.allocate_for_task(2, None);
+        let first = manager.allocate_for_task(1, None).expect("zone for task 1");
+        let second = manager.allocate_for_task(2, None).expect("zone for task 2");
 
         assert_eq!(first, 1);
         assert_eq!(second, 2);
@@ -152,7 +199,7 @@ mod tests {
     #[test]
     fn waits_until_zone_capacity_is_available() {
         let manager = Arc::new(ZoneManager::new(vec![Zone::new(1, "ICU", 1)]));
-        let first_zone = manager.allocate_for_task(1, None);
+        let first_zone = manager.allocate_for_task(1, None).expect("zone for task 1");
         assert_eq!(first_zone, 1);
         assert_eq!(manager.active_tasks_in_zone(1), 1);
 
@@ -162,13 +209,17 @@ mod tests {
 
         let handle = thread::spawn(move || {
             started_tx.send(()).expect("signal thread start");
-            let zone = manager_for_thread.allocate_for_task(2, None);
+            let zone = manager_for_thread
+                .allocate_for_task(2, None)
+                .expect("zone for task 2");
             acquired_tx.send(zone).expect("signal acquisition");
         });
 
         started_rx.recv().expect("thread should start");
         assert!(
-            acquired_rx.recv_timeout(Duration::from_millis(150)).is_err(),
+            acquired_rx
+                .recv_timeout(Duration::from_millis(150))
+                .is_err(),
             "second task should wait while the zone is full"
         );
 
@@ -187,12 +238,11 @@ mod tests {
 
     #[test]
     fn required_zone_pins_task_to_specific_zone() {
-        let manager = ZoneManager::new(vec![
-            Zone::new(1, "ICU", 1),
-            Zone::new(2, "Ward", 2),
-        ]);
+        let manager = ZoneManager::new(vec![Zone::new(1, "ICU", 1), Zone::new(2, "Ward", 2)]);
 
-        let zone = manager.allocate_for_task(1, Some(2));
+        let zone = manager
+            .allocate_for_task(1, Some(2))
+            .expect("zone for task 1");
         assert_eq!(zone, 2, "task should be placed in the required zone");
         assert_eq!(manager.active_tasks_in_zone(2), 1);
         assert_eq!(manager.active_tasks_in_zone(1), 0);
@@ -205,7 +255,9 @@ mod tests {
             Zone::new(2, "Ward", 2),
         ]));
 
-        let zone = manager.allocate_for_task(1, Some(1));
+        let zone = manager
+            .allocate_for_task(1, Some(1))
+            .expect("zone for task 1");
         assert_eq!(zone, 1);
 
         let manager_for_thread = Arc::clone(&manager);
@@ -214,13 +266,17 @@ mod tests {
 
         let handle = thread::spawn(move || {
             started_tx.send(()).expect("signal thread start");
-            let z = manager_for_thread.allocate_for_task(2, Some(1));
+            let z = manager_for_thread
+                .allocate_for_task(2, Some(1))
+                .expect("zone for task 2");
             acquired_tx.send(z).expect("signal acquisition");
         });
 
         started_rx.recv().expect("thread should start");
         assert!(
-            acquired_rx.recv_timeout(Duration::from_millis(150)).is_err(),
+            acquired_rx
+                .recv_timeout(Duration::from_millis(150))
+                .is_err(),
             "task should block even though Ward has capacity, because it requires ICU"
         );
 
@@ -235,4 +291,3 @@ mod tests {
         handle.join().expect("thread should finish");
     }
 }
-

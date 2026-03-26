@@ -52,7 +52,10 @@ pub fn evaluate_health(
     for &id in robot_ids {
         let last_seen = heartbeats.last_seen(id);
         let (status, reason) = match last_seen {
-            None => (RobotHealthStatus::Unreachable, "no heartbeat recorded".to_string()),
+            None => (
+                RobotHealthStatus::Unreachable,
+                "no heartbeat recorded".to_string(),
+            ),
             Some(ts) => {
                 let age = ts.elapsed();
                 if age > heartbeat_timeout {
@@ -95,4 +98,3 @@ pub fn evaluate_health(
         robots: robots_health,
     }
 }
-

@@ -29,7 +29,7 @@ impl ThreadSafeTaskQueue {
     /// Push a task ID into the queue.
     /// Returns false if the queue has been closed and the task was discarded.
     pub fn push(&self, task_id: TaskId) -> bool {
-        let mut inner = self.inner.lock().expect("task queue lock");
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         if inner.closed {
             return false;
         }
@@ -42,7 +42,7 @@ impl ThreadSafeTaskQueue {
     /// - a task arrives, or
     /// - the queue is closed and empty (then returns None).
     pub fn pop_blocking(&self) -> Option<TaskId> {
-        let mut inner = self.inner.lock().expect("task queue lock");
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         loop {
             if let Some(id) = inner.queue.pop_front() {
                 return Some(id);
@@ -50,16 +50,15 @@ impl ThreadSafeTaskQueue {
             if inner.closed {
                 return None;
             }
-            inner = self.cv.wait(inner).expect("task queue wait");
+            inner = self.cv.wait(inner).unwrap_or_else(|e| e.into_inner());
         }
     }
 
     /// Close the queue, waking up all waiting workers.
     /// After this, pushes will be ignored and pops will eventually return None.
     pub fn close(&self) {
-        let mut inner = self.inner.lock().expect("task queue lock");
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         inner.closed = true;
         self.cv.notify_all();
     }
 }
-

@@ -4,7 +4,7 @@
 //! - pool：管理多台 RobotWorker 的调度循环
 //! - state / lifecycle：抽象 Worker 的状态与生命周期管理
 
-pub mod robot;
-pub mod pool;
-pub mod state;
 pub mod lifecycle;
+pub mod pool;
+pub mod robot;
+pub mod state;

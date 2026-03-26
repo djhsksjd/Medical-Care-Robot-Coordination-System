@@ -22,6 +22,7 @@ pub enum TaskStatus {
     Pending,
     Running,
     Finished,
+    Failed,
 }
 
 /// Basic task structure scheduled and executed by workers.

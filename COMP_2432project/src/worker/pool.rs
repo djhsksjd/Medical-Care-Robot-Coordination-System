@@ -15,6 +15,7 @@ use crate::monitor::metrics::MetricsRegistry;
 use crate::scheduler::thread_safe_queue::ThreadSafeTaskQueue;
 use crate::sync::atomic::{AtomicBool, Ordering};
 use crate::types::robot::Robot;
+use crate::worker::lifecycle::PauseController;
 use crate::worker::robot::RobotWorker;
 
 /// Worker pool managing multiple robot workers running in parallel threads.
@@ -26,7 +27,7 @@ pub struct WorkerPool {
     heartbeats: Arc<HeartbeatRegistry>,
     metrics: Arc<MetricsRegistry>,
     shutdown: Arc<AtomicBool>,
-    pause: Arc<AtomicBool>,
+    pause: Arc<PauseController>,
 }
 
 impl WorkerPool {
@@ -39,7 +40,7 @@ impl WorkerPool {
         heartbeats: Arc<HeartbeatRegistry>,
         metrics: Arc<MetricsRegistry>,
         shutdown: Arc<AtomicBool>,
-        pause: Arc<AtomicBool>,
+        pause: Arc<PauseController>,
     ) -> Self {
         Self {
             robots,
@@ -75,15 +76,16 @@ impl WorkerPool {
             handles.push(handle);
         }
 
+        // Demo runs enqueue all tasks up-front. Close the queue now so workers can
+        // exit once it's drained, instead of blocking forever on an empty queue.
+        if !self.shutdown.load(Ordering::SeqCst) {
+            self.task_queue.close();
+        }
+
         for handle in handles {
             if let Err(err) = handle.join() {
                 eprintln!("Worker thread panicked: {:?}", err);
             }
-        }
-
-        // 确保所有工作线程结束后，关闭队列，避免悬挂的阻塞调用。
-        if !self.shutdown.load(Ordering::SeqCst) {
-            self.task_queue.close();
         }
     }
 }

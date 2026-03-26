@@ -17,6 +17,7 @@ use crate::sync::atomic::{AtomicBool, Ordering};
 use crate::types::config::Config;
 use crate::types::robot::Robot;
 use crate::util::logger::log_info;
+use crate::worker::lifecycle::PauseController;
 use crate::worker::pool::WorkerPool;
 
 /// High-level orchestrator for the demo system.
@@ -28,10 +29,7 @@ pub struct Coordinator {
 
 impl Coordinator {
     pub fn new(config: Config, robots: Vec<Robot>) -> Self {
-        Self {
-            config,
-            robots,
-        }
+        Self { config, robots }
     }
 
     /// Run a simple end-to-end demo with real multi-threaded workers.
@@ -46,13 +44,13 @@ impl Coordinator {
         task_queue: Arc<ThreadSafeTaskQueue>,
         zone_manager: Arc<ZoneManager>,
         shutdown: Arc<AtomicBool>,
-        pause: Arc<AtomicBool>,
+        pause: Arc<PauseController>,
     ) {
         log_info("Starting coordinator demo run");
 
         // 确保标志位处于运行状态。
         shutdown.store(false, Ordering::SeqCst);
-        pause.store(false, Ordering::SeqCst);
+        pause.resume();
 
         let pool = WorkerPool::new(
             self.robots.clone(),
@@ -69,4 +67,3 @@ impl Coordinator {
         log_info("Coordinator demo run finished");
     }
 }
-

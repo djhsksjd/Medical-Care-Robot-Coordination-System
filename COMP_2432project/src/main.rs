@@ -3,13 +3,13 @@
 //! 把内核协调器的状态以 JSON 形式暴露给前端 Dashboard 使用。
 
 use std::env;
-use std::process::ExitCode;
 use std::net::SocketAddr;
+use std::process::ExitCode;
 
 use axum::Router;
 use tower_http::cors::{Any, CorsLayer};
 
-use COMP_2432project::api::{build_router, AppState};
+use COMP_2432project::api::{AppState, build_router};
 
 #[tokio::main]
 async fn main() -> ExitCode {
