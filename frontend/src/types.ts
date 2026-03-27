@@ -8,6 +8,7 @@ export interface Task {
   status: TaskStatus;
   robotId?: number;
   zoneId?: number;
+  requiredZoneId?: number;
   expectedDurationMs: number;
   startedAt?: string;
   finishedAt?: string;
@@ -30,6 +31,7 @@ export interface Zone {
   currentTasks: number;
   activeRobots: number;
   health: 'Normal' | 'HighLoad' | 'Error';
+  zoneSwitches: number;
 }
 
 export type SchedulerKind = 'Fifo' | 'Priority' | 'RoundRobin' | 'Srt';
@@ -38,11 +40,15 @@ export interface Config {
   scheduler: SchedulerKind;
   workerCount: number;
   demoTaskCount: number;
+  useWorkStealing: boolean;
+  useStressPreset: boolean;
 }
 
 export interface Metrics {
   throughput: number;
   avgLatencyMs: number;
+  makespanMs: number;
+  totalZoneSwitches: number;
 }
 
 export interface DemoInputTask {
@@ -51,6 +57,7 @@ export interface DemoInputTask {
   priority: TaskPriority;
   expectedDurationMs: number;
   description: string;
+  requiredZoneId?: number;
 }
 
 export interface StrategyTaskTiming {

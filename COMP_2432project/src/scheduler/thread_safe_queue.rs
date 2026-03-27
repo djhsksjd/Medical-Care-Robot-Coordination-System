@@ -54,6 +54,12 @@ impl ThreadSafeTaskQueue {
         }
     }
 
+    /// Non-blocking pop: returns `Some(id)` if a task is available, `None` otherwise.
+    pub fn try_pop(&self) -> Option<TaskId> {
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        inner.queue.pop_front()
+    }
+
     /// Close the queue, waking up all waiting workers.
     /// After this, pushes will be ignored and pops will eventually return None.
     pub fn close(&self) {

@@ -17,14 +17,34 @@ pub struct Config {
     pub scheduler: SchedulerKind,
     pub worker_count: usize,
     pub demo_task_count: usize,
+    /// When `true`, workers use the innovative work-stealing + non-blocking
+    /// zone allocation path. When `false`, the classic blocking path is used.
+    /// This toggle exists for A/B comparison experiments.
+    #[serde(default = "default_use_work_stealing")]
+    pub use_work_stealing: bool,
+    /// When `true`, run with backend-defined stress-test preset values.
+    /// Effective worker/task counts are resolved in coordinator builder.
+    #[serde(default = "default_use_stress_preset")]
+    pub use_stress_preset: bool,
+}
+
+fn default_use_work_stealing() -> bool {
+    false
+}
+
+fn default_use_stress_preset() -> bool {
+    false
 }
 
 impl Default for Config {
     fn default() -> Self {
         Self {
             scheduler: SchedulerKind::Fifo,
-            worker_count: 9, // 多机器人压力测试：默认 9 台 Robot 并发从队列取任务
-            demo_task_count: 63,
+            worker_count: 9, //多机器人数量
+            demo_task_count: 20,//task数量
+            // 默认走 classic，便于前端通过开关/实验按钮显式对比两种模式。
+            use_work_stealing: false,
+            use_stress_preset: false,
         }
     }
 }

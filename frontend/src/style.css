@@ -635,3 +635,372 @@ button:focus-visible {
   border: 1px solid #d1d5db;
   font-size: 0.8rem;
 }
+
+.config-toggle-row {
+  flex-direction: row !important;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px !important;
+}
+
+.toggle-btn {
+  min-width: 52px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  border: 2px solid transparent;
+  transition: all 0.2s ease;
+}
+
+.toggle-btn-on {
+  color: #fff;
+  background: linear-gradient(135deg, #2563eb, #7c3aed);
+  border-color: #2563eb;
+}
+
+.toggle-btn-off {
+  color: #6b7280;
+  background: #f3f4f6;
+  border-color: #d1d5db;
+}
+
+.toggle-btn-on:hover {
+  background: linear-gradient(135deg, #1d4ed8, #6d28d9);
+  border-color: #1d4ed8;
+}
+
+.toggle-btn-off:hover {
+  border-color: #9ca3af;
+  background: #e5e7eb;
+}
+
+/* ── TopBar mode tag ─────────────────────────────────────────────── */
+
+.topbar-mode-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.topbar-mode-ws {
+  color: #7c3aed;
+  background: #ede9fe;
+}
+
+.topbar-mode-classic {
+  color: #64748b;
+  background: #f1f5f9;
+}
+
+/* ── Experiment Panel ────────────────────────────────────────────── */
+
+.experiment-panel {
+  margin: 0 16px;
+  margin-top: 12px;
+  background: linear-gradient(135deg, #fefce8 0%, #fff7ed 40%, #fef2f2 100%);
+  border: 2px solid #fbbf24;
+  border-radius: 12px;
+  padding: 16px 20px;
+}
+
+.experiment-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+
+.experiment-title {
+  font-size: 1.05rem;
+  font-weight: 800;
+  color: #92400e;
+  letter-spacing: -0.01em;
+}
+
+.experiment-subtitle {
+  font-size: 0.78rem;
+  color: #78350f;
+  margin-top: 4px;
+  max-width: 600px;
+  line-height: 1.4;
+}
+
+.experiment-current-mode {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.experiment-mode-label {
+  font-size: 0.75rem;
+  color: #78350f;
+  font-weight: 500;
+}
+
+.experiment-mode-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.experiment-mode-badge-ws {
+  color: #7c3aed;
+  background: #ede9fe;
+  border: 1px solid #c4b5fd;
+}
+
+.experiment-mode-badge-classic {
+  color: #64748b;
+  background: #f1f5f9;
+  border: 1px solid #cbd5e1;
+}
+
+.experiment-mode-detail {
+  font-size: 0.72rem;
+  color: #92400e;
+}
+
+.experiment-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+
+.experiment-btn {
+  flex: 1;
+  min-width: 200px;
+  padding: 12px 16px;
+  border-radius: 10px;
+  font-size: 0.88rem;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  transition: all 0.2s ease;
+  border: 2px solid transparent;
+}
+
+.experiment-btn-desc {
+  font-size: 0.68rem;
+  font-weight: 400;
+  opacity: 0.8;
+}
+
+.experiment-btn-classic {
+  color: #334155;
+  background: #f8fafc;
+  border-color: #94a3b8;
+}
+
+.experiment-btn-classic:hover:not(:disabled) {
+  background: #e2e8f0;
+  border-color: #64748b;
+}
+
+.experiment-btn-ws {
+  color: #fff;
+  background: linear-gradient(135deg, #7c3aed, #2563eb);
+  border-color: #7c3aed;
+}
+
+.experiment-btn-ws:hover:not(:disabled) {
+  background: linear-gradient(135deg, #6d28d9, #1d4ed8);
+  border-color: #6d28d9;
+}
+
+.experiment-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.experiment-vs {
+  font-size: 1.1rem;
+  font-weight: 900;
+  color: #b45309;
+  flex-shrink: 0;
+}
+
+/* ── Experiment Results ──────────────────────────────────────────── */
+
+.experiment-results {
+  border-top: 1px solid #fcd34d;
+  padding-top: 12px;
+}
+
+.experiment-results-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.experiment-results-title {
+  font-weight: 700;
+  font-size: 0.88rem;
+  color: #92400e;
+}
+
+.experiment-clear-btn {
+  font-size: 0.72rem;
+  padding: 2px 8px;
+  border-radius: 6px;
+  color: #92400e;
+  border-color: #fbbf24;
+}
+
+.experiment-results-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 10px;
+}
+
+.experiment-result-card {
+  border-radius: 8px;
+  padding: 10px 12px;
+  border: 1px solid #e5e7eb;
+  background: #fff;
+}
+
+.experiment-result-card-ws {
+  border-color: #c4b5fd;
+  background: linear-gradient(180deg, #faf5ff, #fff);
+}
+
+.experiment-result-card-classic {
+  border-color: #cbd5e1;
+  background: linear-gradient(180deg, #f8fafc, #fff);
+}
+
+.experiment-result-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.experiment-result-badge {
+  font-size: 0.7rem;
+}
+
+.experiment-result-time {
+  font-size: 0.68rem;
+  color: #9ca3af;
+}
+
+.experiment-result-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+
+.experiment-result-stats > div {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.experiment-result-stats span {
+  font-size: 0.65rem;
+  color: #6b7280;
+}
+
+.experiment-result-stats strong {
+  font-size: 0.82rem;
+  color: #111827;
+}
+
+/* ── Head-to-Head comparison ─────────────────────────────────────── */
+
+.experiment-comparison {
+  margin-bottom: 14px;
+  border: 1px solid #fde68a;
+  border-radius: 10px;
+  padding: 12px;
+  background: #fffbeb;
+}
+
+.experiment-comparison-title {
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: #92400e;
+  margin-bottom: 8px;
+}
+
+.experiment-comparison-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.experiment-comparison-row {
+  display: grid;
+  grid-template-columns: 110px 1fr 1fr 90px;
+  gap: 8px;
+  align-items: center;
+  font-size: 0.8rem;
+}
+
+.experiment-comparison-label {
+  font-weight: 600;
+  color: #78350f;
+}
+
+.experiment-comparison-cell {
+  text-align: center;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  font-weight: 500;
+}
+
+.experiment-comparison-winner {
+  background: #dcfce7;
+  border-color: #86efac;
+  color: #166534;
+  font-weight: 700;
+}
+
+.experiment-comparison-verdict {
+  text-align: center;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 6px;
+}
+
+.experiment-verdict-ws {
+  color: #7c3aed;
+  background: #ede9fe;
+}
+
+.experiment-verdict-classic {
+  color: #64748b;
+  background: #f1f5f9;
+}
+
+.experiment-comparison-legend {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 8px;
+  font-size: 0.75rem;
+  color: #78350f;
+}

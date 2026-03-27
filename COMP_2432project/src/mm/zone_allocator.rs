@@ -99,6 +99,63 @@ impl ZoneManager {
         }
     }
 
+    /// Non-blocking zone allocation attempt. Returns `None` immediately when no
+    /// suitable zone has available capacity, instead of blocking on `Condvar`.
+    pub fn try_allocate_for_task(
+        &self,
+        task_id: TaskId,
+        required_zone: Option<ZoneId>,
+    ) -> Option<ZoneId> {
+        if self.zones.is_empty() {
+            return None;
+        }
+
+        let mut state = self.state.lock().expect("zone manager lock");
+
+        if let Some(target_id) = required_zone {
+            let zone = self.zones.iter().find(|z| z.id == target_id)?;
+            let active = state.active_counts.get(&zone.id).copied().unwrap_or(0);
+            if active < zone.capacity as usize {
+                state.active_counts.insert(zone.id, active + 1);
+                drop(state);
+                self.allocations.assign(task_id, zone.id);
+                return Some(zone.id);
+            }
+        } else {
+            let zone_count = self.zones.len();
+            let start_index = state.next_index % zone_count;
+            for offset in 0..zone_count {
+                let idx = (start_index + offset) % zone_count;
+                let zone = &self.zones[idx];
+                let active = state.active_counts.get(&zone.id).copied().unwrap_or(0);
+                if active < zone.capacity as usize {
+                    state.active_counts.insert(zone.id, active + 1);
+                    state.next_index = (idx + 1) % zone_count;
+                    drop(state);
+                    self.allocations.assign(task_id, zone.id);
+                    return Some(zone.id);
+                }
+            }
+        }
+
+        None
+    }
+
+    /// Non-blocking lease variant. Returns `None` when no zone has capacity.
+    pub fn try_lease_for_task(
+        self: &std::sync::Arc<Self>,
+        task_id: TaskId,
+        required_zone: Option<ZoneId>,
+    ) -> Option<ZoneLease> {
+        let zone_id = self.try_allocate_for_task(task_id, required_zone)?;
+        Some(ZoneLease {
+            manager: std::sync::Arc::clone(self),
+            task_id,
+            zone_id,
+            released: false,
+        })
+    }
+
     /// Acquire a zone lease for a task. The lease releases automatically on drop.
     pub fn lease_for_task(
         self: &std::sync::Arc<Self>,

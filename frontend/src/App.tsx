@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   SystemState,
   Task,
@@ -9,11 +9,26 @@ import type {
   SchedulerKind,
   DemoInputTask,
   StrategySummary,
+  Metrics,
 } from './types';
 import './style.css';
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/$/, '');
 const SUPPORTED_SCHEDULERS: SchedulerKind[] = ['Fifo', 'Priority', 'RoundRobin', 'Srt'];
+
+interface ExperimentSnapshot {
+  mode: 'classic' | 'work-stealing';
+  preset: 'default' | 'stress';
+  scheduler: SchedulerKind;
+  workerCount: number;
+  demoTaskCount: number;
+  metrics: Metrics;
+  finishedCount: number;
+  failedCount: number;
+  totalTasks: number;
+  totalZoneSwitches: number;
+  capturedAt: string;
+}
 
 function apiUrl(path: string): string {
   return `${API_BASE}${path}`;
@@ -118,6 +133,8 @@ const App: React.FC = () => {
   const [filterStatus, setFilterStatus] = useState<TaskStatus | 'All'>('All');
   const [filterRobotId, setFilterRobotId] = useState<number | 'All'>('All');
   const [filterZoneId, setFilterZoneId] = useState<number | 'All'>('All');
+  const [experimentSnapshots, setExperimentSnapshots] = useState<ExperimentSnapshot[]>([]);
+  const experimentPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const refreshState = useCallback(async (): Promise<SystemState | null> => {
     setLoading(true);
@@ -153,6 +170,99 @@ const App: React.FC = () => {
       clearInterval(id);
     };
   }, [refreshState]);
+
+  const captureExperimentResult = useCallback(
+    (snapshot: SystemState) => {
+      const finished = snapshot.tasks.filter((t) => t.status === 'Finished').length;
+      const failed = snapshot.tasks.filter((t) => t.status === 'Failed').length;
+      const total = snapshot.tasks.length;
+
+      const totalZoneSwitches = snapshot.zones.reduce((sum, z) => sum + z.zoneSwitches, 0);
+
+      const entry: ExperimentSnapshot = {
+        mode: snapshot.config.useWorkStealing ? 'work-stealing' : 'classic',
+        preset: snapshot.config.useStressPreset ? 'stress' : 'default',
+        scheduler: snapshot.config.scheduler,
+        workerCount: snapshot.config.workerCount,
+        demoTaskCount: snapshot.config.demoTaskCount,
+        metrics: snapshot.metrics,
+        finishedCount: finished,
+        failedCount: failed,
+        totalTasks: total,
+        totalZoneSwitches,
+        capturedAt: new Date().toLocaleTimeString(),
+      };
+      setExperimentSnapshots((prev) => [...prev, entry]);
+    },
+    [],
+  );
+
+  const runExperiment = useCallback(
+    async (useWorkStealing: boolean) => {
+      const label = useWorkStealing ? 'experiment-ws' : 'experiment-classic';
+      setBusyAction(label);
+      setLoadError(null);
+      try {
+        const currentConfig = configDraft ?? state?.config;
+        if (!currentConfig) return;
+
+        const experimentConfig: Config = {
+          ...currentConfig,
+          useWorkStealing,
+        };
+
+        await updateConfig(experimentConfig);
+        setConfigDraft(experimentConfig);
+        setIsConfigDirty(false);
+
+        await controlSystem('run-demo');
+
+        if (experimentPollRef.current) clearInterval(experimentPollRef.current);
+
+        const experimentStartTime = Date.now();
+        const MAX_POLL_MS = 180_000;
+        let sawRunning = false;
+
+        experimentPollRef.current = setInterval(async () => {
+          try {
+            const data = await fetchSystemState();
+            setState(data);
+
+            if (data.systemStatus === 'Running') {
+              sawRunning = true;
+            }
+
+            const finished = data.tasks.filter((t) => t.status === 'Finished').length;
+            const failed = data.tasks.filter((t) => t.status === 'Failed').length;
+            const total = data.tasks.length;
+            const allDone = total > 0 && finished + failed === total;
+
+            const isDone =
+              (data.systemStatus === 'Stopped' && total > 0 && sawRunning) || allDone;
+
+            const timedOut = Date.now() - experimentStartTime > MAX_POLL_MS;
+
+            if (isDone || timedOut) {
+              if (experimentPollRef.current) {
+                clearInterval(experimentPollRef.current);
+                experimentPollRef.current = null;
+              }
+              if (total > 0) {
+                captureExperimentResult(data);
+              }
+              setBusyAction(null);
+            }
+          } catch {
+            // keep polling
+          }
+        }, 1500);
+      } catch (error) {
+        setLoadError(getErrorMessage(error));
+        setBusyAction(null);
+      }
+    },
+    [configDraft, state, captureExperimentResult],
+  );
 
   const filteredTasks: Task[] = useMemo(() => {
     if (!state) return [];
@@ -207,6 +317,7 @@ const App: React.FC = () => {
           systemStatus={state.systemStatus}
           metrics={state.metrics}
           scheduler={state.config.scheduler}
+          useWorkStealing={state.config.useWorkStealing}
           currentStrategySummary={currentStrategySummary}
           loading={loading}
           busyAction={busyAction}
@@ -222,6 +333,30 @@ const App: React.FC = () => {
               setBusyAction(null);
             }
           }}
+        />
+        <ExperimentPanel
+          currentConfig={state.config}
+          useStressPreset={state.config.useStressPreset}
+          snapshots={experimentSnapshots}
+          busyAction={busyAction}
+          onToggleStressPreset={async () => {
+            const base = configDraft ?? state.config;
+            const next = { ...base, useStressPreset: !state.config.useStressPreset };
+            setBusyAction('experiment-preset');
+            try {
+              await updateConfig(next);
+              setConfigDraft(next);
+              setIsConfigDirty(false);
+              await refreshState();
+            } catch (error) {
+              setLoadError(getErrorMessage(error));
+            } finally {
+              setBusyAction(null);
+            }
+          }}
+          onRunClassic={() => void runExperiment(false)}
+          onRunWorkStealing={() => void runExperiment(true)}
+          onClearSnapshots={() => setExperimentSnapshots([])}
         />
         <div className="dashboard-content">
           <div className="dashboard-left">
@@ -269,6 +404,7 @@ interface TopBarProps {
   systemStatus: SystemState['systemStatus'];
   metrics: SystemState['metrics'];
   scheduler: SchedulerKind;
+  useWorkStealing: boolean;
   currentStrategySummary?: StrategySummary;
   loading: boolean;
   busyAction: string | null;
@@ -280,6 +416,7 @@ const TopBar: React.FC<TopBarProps> = ({
   systemStatus,
   metrics,
   scheduler,
+  useWorkStealing,
   currentStrategySummary,
   loading,
   busyAction,
@@ -307,10 +444,15 @@ const TopBar: React.FC<TopBarProps> = ({
       <div className="topbar-right">
         <div className="topbar-metrics">
           Live: throughput {metrics.throughput} · avg latency {metrics.avgLatencyMs} ms
+          {metrics.makespanMs > 0 ? ` · makespan ${formatDuration(metrics.makespanMs)}` : ''}
+          {metrics.totalZoneSwitches > 0 ? ` · zone switches ${metrics.totalZoneSwitches}` : ''}
           {' · '}mode {scheduler}
           {currentStrategySummary
             ? ` · projected finish ${formatDuration(currentStrategySummary.makespanMs)}`
             : ''}
+          {' · '}<span className={`topbar-mode-tag ${useWorkStealing ? 'topbar-mode-ws' : 'topbar-mode-classic'}`}>
+            {useWorkStealing ? 'Work Stealing ON' : 'Classic Mode'}
+          </span>
         </div>
         {error ? <div className="topbar-error">{error}</div> : null}
         <button disabled={busyAction !== null} onClick={() => void onControl('run-demo')}>
@@ -775,7 +917,7 @@ const RobotsPanel: React.FC<RobotsPanelProps> = ({ robots, tasks }) => {
             <div className="robot-sub">
               Current task:{' '}
               {currentTask ? `${currentTask.name} (#${currentTask.id})` : 'idle'}
-              {' · '}recent completed: {r.recentCompleted}
+              {' · '}completed: {r.recentCompleted}
             </div>
           </div>
         );
@@ -807,7 +949,7 @@ const ZonesPanel: React.FC<ZonesPanelProps> = ({ zones }) => {
               <div className="zone-sub">
                 Tasks: {z.currentTasks} / {z.capacity}
               </div>
-              <div className="zone-sub">Robots: {z.activeRobots}</div>
+              <div className="zone-sub">Robots: {z.activeRobots} · Switches out: {z.zoneSwitches}</div>
               <div className="zone-bar">
                 <div
                   className="zone-bar-inner"
@@ -875,9 +1017,296 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, busy, onChange, onApp
             onChange={(e) => onChange({ ...config, demoTaskCount: Number(e.target.value) })}
           />
         </label>
+        <label className="config-toggle-row">
+          <span>Work Stealing + Non-blocking Zone</span>
+          <button
+            type="button"
+            className={`toggle-btn ${config.useWorkStealing ? 'toggle-btn-on' : 'toggle-btn-off'}`}
+            onClick={() => onChange({ ...config, useWorkStealing: !config.useWorkStealing })}
+          >
+            {config.useWorkStealing ? 'ON' : 'OFF'}
+          </button>
+        </label>
         <button type="button" disabled={busy} onClick={onApply}>
           Apply &amp; Restart Demo
         </button>
+      </div>
+    </div>
+  );
+};
+
+// ── A/B Experiment Panel ────────────────────────────────────────────
+
+interface ExperimentPanelProps {
+  currentConfig: Config;
+  useStressPreset: boolean;
+  snapshots: ExperimentSnapshot[];
+  busyAction: string | null;
+  onToggleStressPreset: () => void;
+  onRunClassic: () => void;
+  onRunWorkStealing: () => void;
+  onClearSnapshots: () => void;
+}
+
+const ExperimentPanel: React.FC<ExperimentPanelProps> = ({
+  currentConfig,
+  useStressPreset,
+  snapshots,
+  busyAction,
+  onToggleStressPreset,
+  onRunClassic,
+  onRunWorkStealing,
+  onClearSnapshots,
+}) => {
+  const isBusy =
+    busyAction === 'experiment-ws' ||
+    busyAction === 'experiment-classic' ||
+    busyAction === 'experiment-preset';
+
+  const classicSnapshots = snapshots.filter((s) => s.mode === 'classic');
+  const wsSnapshots = snapshots.filter((s) => s.mode === 'work-stealing');
+  const latestClassic = classicSnapshots[classicSnapshots.length - 1];
+  const latestWs = wsSnapshots[wsSnapshots.length - 1];
+
+  return (
+    <div className="experiment-panel">
+      <div className="experiment-header">
+        <div>
+          <div className="experiment-title">A/B Comparison Experiment</div>
+          <div className="experiment-subtitle">
+            Compare the innovative <strong>Work Stealing + Non-blocking Zone Allocation</strong> against
+            the <strong>Classic Blocking</strong> baseline. Each button applies the config, runs the
+            demo, and captures final metrics automatically.
+          </div>
+        </div>
+        <div className="experiment-current-mode">
+          <span className="experiment-mode-label">Current config:</span>
+          <span
+            className={`experiment-mode-badge ${
+              currentConfig.useWorkStealing ? 'experiment-mode-badge-ws' : 'experiment-mode-badge-classic'
+            }`}
+          >
+            {currentConfig.useWorkStealing ? 'Work Stealing' : 'Classic'}
+          </span>
+          <span className="experiment-mode-detail">
+            {currentConfig.scheduler} · {currentConfig.workerCount} workers · {currentConfig.demoTaskCount} tasks
+          </span>
+        </div>
+      </div>
+
+      <div className="experiment-actions">
+        <button
+          className={`toggle-btn ${useStressPreset ? 'toggle-btn-on' : 'toggle-btn-off'}`}
+          type="button"
+          disabled={isBusy}
+          onClick={onToggleStressPreset}
+          title="Use backend stress preset from coordinator builder"
+        >
+          Stress Preset {useStressPreset ? 'ON' : 'OFF'}
+        </button>
+        <button
+          className="experiment-btn experiment-btn-classic"
+          disabled={isBusy}
+          onClick={onRunClassic}
+        >
+          {busyAction === 'experiment-classic' ? 'Running Classic…' : 'Run Classic (Baseline)'}
+          <span className="experiment-btn-desc">Blocking queue + blocking zone allocation</span>
+        </button>
+        <div className="experiment-vs">VS</div>
+        <button
+          className="experiment-btn experiment-btn-ws"
+          disabled={isBusy}
+          onClick={onRunWorkStealing}
+        >
+          {busyAction === 'experiment-ws' ? 'Running Work Stealing…' : 'Run Work Stealing (Innovation)'}
+          <span className="experiment-btn-desc">Local queue + steal + non-blocking zone</span>
+        </button>
+      </div>
+      <div className="experiment-subtitle">
+        Active run params:{' '}
+        {useStressPreset
+          ? 'Backend stress preset (resolved in coordinator builder)'
+          : `Current config (${currentConfig.workerCount} workers, ${currentConfig.demoTaskCount} tasks)`}
+      </div>
+
+      {snapshots.length > 0 && (
+        <div className="experiment-results">
+          <div className="experiment-results-header">
+            <div className="experiment-results-title">Captured Results</div>
+            <button className="experiment-clear-btn" onClick={onClearSnapshots}>
+              Clear All
+            </button>
+          </div>
+
+          {latestClassic && latestWs && (
+            <ExperimentComparisonBar classic={latestClassic} ws={latestWs} />
+          )}
+
+          <div className="experiment-results-grid">
+            {[...snapshots].reverse().map((snap, i) => (
+              <div
+                key={`${snap.capturedAt}-${i}`}
+                className={`experiment-result-card ${
+                  snap.mode === 'work-stealing'
+                    ? 'experiment-result-card-ws'
+                    : 'experiment-result-card-classic'
+                }`}
+              >
+                <div className="experiment-result-header">
+                  <span
+                    className={`experiment-result-badge ${
+                      snap.mode === 'work-stealing'
+                        ? 'experiment-mode-badge-ws'
+                        : 'experiment-mode-badge-classic'
+                    }`}
+                  >
+                    {snap.mode === 'work-stealing' ? 'Work Stealing' : 'Classic'}
+                  </span>
+                  <span className="experiment-result-time">{snap.capturedAt}</span>
+                </div>
+                <div className="experiment-result-stats">
+                  <div>
+                    <span>Makespan</span>
+                    <strong>{formatDuration(snap.metrics.makespanMs)}</strong>
+                  </div>
+                  <div>
+                    <span>Avg Latency</span>
+                    <strong>{snap.metrics.avgLatencyMs} ms</strong>
+                  </div>
+                  <div>
+                    <span>Zone Switches</span>
+                    <strong>{snap.totalZoneSwitches}</strong>
+                  </div>
+                  <div>
+                    <span>Throughput</span>
+                    <strong>{snap.metrics.throughput}</strong>
+                  </div>
+                  <div>
+                    <span>Finished</span>
+                    <strong>
+                      {snap.finishedCount}/{snap.totalTasks}
+                    </strong>
+                  </div>
+                  <div>
+                    <span>Failed</span>
+                    <strong>{snap.failedCount}</strong>
+                  </div>
+                  <div>
+                    <span>Scheduler</span>
+                    <strong>{snap.scheduler}</strong>
+                  </div>
+                  <div>
+                    <span>Workers</span>
+                    <strong>{snap.workerCount}</strong>
+                  </div>
+                  <div>
+                    <span>Preset</span>
+                    <strong>{snap.preset === 'stress' ? 'Stress' : 'Default'}</strong>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+interface ExperimentComparisonBarProps {
+  classic: ExperimentSnapshot;
+  ws: ExperimentSnapshot;
+}
+
+const ExperimentComparisonBar: React.FC<ExperimentComparisonBarProps> = ({ classic, ws }) => {
+  const metrics: { label: string; classicVal: number; wsVal: number; unit: string; lowerBetter: boolean }[] = [
+    {
+      label: 'Makespan (wall clock)',
+      classicVal: classic.metrics.makespanMs,
+      wsVal: ws.metrics.makespanMs,
+      unit: 'ms',
+      lowerBetter: true,
+    },
+    {
+      label: 'Avg Latency',
+      classicVal: classic.metrics.avgLatencyMs,
+      wsVal: ws.metrics.avgLatencyMs,
+      unit: 'ms',
+      lowerBetter: true,
+    },
+    {
+      label: 'Zone Switches',
+      classicVal: classic.totalZoneSwitches,
+      wsVal: ws.totalZoneSwitches,
+      unit: '',
+      lowerBetter: true,
+    },
+    {
+      label: 'Throughput',
+      classicVal: classic.metrics.throughput,
+      wsVal: ws.metrics.throughput,
+      unit: '',
+      lowerBetter: false,
+    },
+    {
+      label: 'Finished Tasks',
+      classicVal: classic.finishedCount,
+      wsVal: ws.finishedCount,
+      unit: '',
+      lowerBetter: false,
+    },
+    {
+      label: 'Failed Tasks',
+      classicVal: classic.failedCount,
+      wsVal: ws.failedCount,
+      unit: '',
+      lowerBetter: true,
+    },
+  ];
+
+  return (
+    <div className="experiment-comparison">
+      <div className="experiment-comparison-title">Latest Head-to-Head</div>
+      <div className="experiment-comparison-grid">
+        {metrics.map((m) => {
+          const diff = m.lowerBetter ? m.classicVal - m.wsVal : m.wsVal - m.classicVal;
+          const wsWins = diff > 0;
+          const tie = diff === 0;
+
+          return (
+            <div key={m.label} className="experiment-comparison-row">
+              <div className="experiment-comparison-label">{m.label}</div>
+              <div
+                className={`experiment-comparison-cell ${
+                  !tie && !wsWins ? 'experiment-comparison-winner' : ''
+                }`}
+              >
+                {m.classicVal}
+                {m.unit ? ` ${m.unit}` : ''}
+              </div>
+              <div
+                className={`experiment-comparison-cell ${
+                  !tie && wsWins ? 'experiment-comparison-winner' : ''
+                }`}
+              >
+                {m.wsVal}
+                {m.unit ? ` ${m.unit}` : ''}
+              </div>
+              <div
+                className={`experiment-comparison-verdict ${
+                  tie ? '' : wsWins ? 'experiment-verdict-ws' : 'experiment-verdict-classic'
+                }`}
+              >
+                {tie ? 'Tie' : wsWins ? 'WS wins' : 'Classic wins'}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <div className="experiment-comparison-legend">
+        <span className="experiment-mode-badge-classic">Classic</span>
+        <span>vs</span>
+        <span className="experiment-mode-badge-ws">Work Stealing</span>
       </div>
     </div>
   );

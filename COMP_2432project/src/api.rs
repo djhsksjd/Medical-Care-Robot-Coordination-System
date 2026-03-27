@@ -14,7 +14,10 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::coordinator::builder::{CoordinatorBuilder, DemoTaskPlan, demo_task_plans};
+use crate::coordinator::builder::{
+    CoordinatorBuilder, DemoTaskPlan, demo_task_plans, effective_demo_task_count,
+    effective_worker_count,
+};
 use crate::coordinator::task_table::TaskTable;
 use crate::mm::zone_allocator::ZoneManager;
 use crate::monitor::heartbeat::HeartbeatRegistry;
@@ -42,6 +45,10 @@ pub enum SystemStatus {
 pub struct Metrics {
     pub throughput: u64,
     pub avg_latency_ms: u64,
+    /// Wall-clock time from demo start to demo end (milliseconds).
+    pub makespan_ms: u64,
+    /// Total zone-switch events across all robots (work-stealing only).
+    pub total_zone_switches: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -96,6 +103,8 @@ pub struct Zone {
     pub current_tasks: u32,
     pub active_robots: u32,
     pub health: ZoneHealth,
+    /// Number of times a robot switched *out of* this zone to execute in another.
+    pub zone_switches: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -191,6 +200,14 @@ pub struct AppState {
     inner: Arc<Mutex<SharedState>>,
 }
 
+fn default_zones() -> Vec<crate::types::zone::Zone> {
+    vec![
+        crate::types::zone::Zone::new(1, "ICU".to_string(), 2),
+        crate::types::zone::Zone::new(2, "Ward".to_string(), 2),
+        crate::types::zone::Zone::new(3, "OR".to_string(), 1),
+    ]
+}
+
 impl AppState {
     pub fn new() -> Self {
         let config = Config::default();
@@ -198,12 +215,7 @@ impl AppState {
         let metrics = Arc::new(MetricsRegistry::new());
         let task_table = Arc::new(TaskTable::new());
         let task_queue = Arc::new(ThreadSafeTaskQueue::new());
-        let zones = vec![
-            crate::types::zone::Zone::new(1, "ICU".to_string(), 2),
-            crate::types::zone::Zone::new(2, "Ward".to_string(), 2),
-            crate::types::zone::Zone::new(3, "OR".to_string(), 1),
-        ];
-        let zone_manager = Arc::new(ZoneManager::new(zones));
+        let zone_manager = Arc::new(ZoneManager::new(default_zones()));
         let worker_shutdown = Arc::new(AtomicBool::new(false));
         let worker_pause = Arc::new(PauseController::new());
         let monitor_shutdown = Arc::new(AtomicBool::new(false));
@@ -261,15 +273,24 @@ impl AppState {
     /// Apply a new config (same semantics as `PUT /api/config`).
     pub fn apply_config(&self, new_config: Config) {
         let mut guard = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+
+        // Signal OLD monitor/worker threads to stop (they hold clones of
+        // the current Arcs). Then replace with fresh Arcs so the next run
+        // gets independent flags.
+        guard.monitor_shutdown.store(true, Ordering::SeqCst);
+        guard.worker_shutdown.store(true, Ordering::SeqCst);
+        guard.task_queue.close();
+
         guard.config = new_config;
         guard.heartbeats = Arc::new(HeartbeatRegistry::new());
         guard.metrics = Arc::new(MetricsRegistry::new());
         guard.task_table = Arc::new(TaskTable::new());
         guard.task_queue = Arc::new(ThreadSafeTaskQueue::new());
-        guard.system_status = SystemStatus::Stopped;
-        guard.worker_shutdown.store(false, Ordering::SeqCst);
+        guard.zone_manager = Arc::new(ZoneManager::new(default_zones()));
+        guard.worker_shutdown = Arc::new(AtomicBool::new(false));
         guard.worker_pause.resume();
-        guard.monitor_shutdown.store(false, Ordering::SeqCst);
+        guard.monitor_shutdown = Arc::new(AtomicBool::new(false));
+        guard.system_status = SystemStatus::Stopped;
         guard.run_generation += 1;
     }
 
@@ -282,8 +303,10 @@ impl AppState {
 fn snapshot_state_inner(app: &AppState) -> SystemState {
     let guard = app.inner.lock().unwrap_or_else(|e| e.into_inner());
     let hb_timeout = Duration::from_secs(5);
-    let demo_plans = demo_task_plans(guard.config.demo_task_count);
-    let scheduling_analysis = build_scheduling_analysis(&demo_plans, guard.config.worker_count);
+    let effective_tasks = effective_demo_task_count(&guard.config);
+    let effective_workers = effective_worker_count(&guard.config);
+    let demo_plans = demo_task_plans(effective_tasks);
+    let scheduling_analysis = build_scheduling_analysis(&demo_plans, effective_workers);
     let task_snapshots = guard.task_table.all();
 
     let running_tasks_by_robot: HashMap<RobotId, u64> = task_snapshots
@@ -297,7 +320,7 @@ fn snapshot_state_inner(app: &AppState) -> SystemState {
         .collect();
 
     // Build monitoring report for all robots that coordinator knows about.
-    let robot_ids: Vec<RobotId> = (1..=guard.config.worker_count as u64).collect();
+    let robot_ids: Vec<RobotId> = (1..=effective_workers as u64).collect();
     let report: SystemReport = build_report(
         guard.heartbeats.as_ref(),
         guard.metrics.as_ref(),
@@ -338,6 +361,10 @@ fn snapshot_state_inner(app: &AppState) -> SystemState {
             recent_completed: rr.metrics.completed_tasks,
         })
         .collect();
+
+    let zone_switch_map = guard.metrics.zone_switch_snapshot();
+    let total_zone_switches: u64 = zone_switch_map.values().sum();
+    let makespan_ms = guard.metrics.makespan_ms();
 
     // Build task list from the central TaskTable so we reflect real statuses.
     let mut tasks: Vec<Task> = task_snapshots
@@ -387,6 +414,7 @@ fn snapshot_state_inner(app: &AppState) -> SystemState {
             ZoneHealth::Normal
         };
 
+        let zs = zone_switch_map.get(&z.id).copied().unwrap_or(0);
         zones.push(Zone {
             id: z.id,
             name: z.name.clone(),
@@ -394,6 +422,7 @@ fn snapshot_state_inner(app: &AppState) -> SystemState {
             current_tasks,
             active_robots,
             health,
+            zone_switches: zs,
         });
     }
 
@@ -405,6 +434,8 @@ fn snapshot_state_inner(app: &AppState) -> SystemState {
         metrics: Metrics {
             throughput,
             avg_latency_ms,
+            makespan_ms,
+            total_zone_switches,
         },
         system_status: guard.system_status,
         scheduling_analysis,
@@ -482,6 +513,20 @@ fn build_scheduling_analysis(
     }
 }
 
+/// Default zone capacities used by the simulation to mirror the live system.
+const SIM_ZONE_CAPS: [(u64, u32); 3] = [
+    (1, 2), // ICU
+    (2, 2), // Ward
+    (3, 1), // OR
+];
+
+/// Event used by the zone-aware discrete-event simulation.
+#[derive(Debug, Clone, Copy)]
+struct SimEvent {
+    finish_ms: u64,
+    zone_id: u64,
+}
+
 fn simulate_strategy(
     scheduler_kind: SchedulerKind,
     demo_plans: &[DemoTaskPlan],
@@ -496,26 +541,46 @@ fn simulate_strategy(
     for plan in demo_plans {
         let mut task = CoreTask::new(plan.sequence, plan.name.clone(), plan.expected_duration);
         task.priority = plan.priority;
+        task.required_zone = plan.required_zone;
         scheduler.submit(task);
     }
 
-    let mut ordered_tasks = Vec::with_capacity(demo_plans.len());
+    struct OrderedTask {
+        id: u64,
+        name: String,
+        priority: CoreTaskPriority,
+        duration_ms: u64,
+        required_zone: Option<u64>,
+    }
+
+    let mut ordered_tasks: Vec<OrderedTask> = Vec::with_capacity(demo_plans.len());
     while !scheduler.is_empty() {
         if let Ok(task) = scheduler.next_task() {
-            ordered_tasks.push(task);
+            ordered_tasks.push(OrderedTask {
+                id: task.id,
+                name: task.name,
+                priority: task.priority,
+                duration_ms: task.expected_duration.as_millis() as u64,
+                required_zone: task.required_zone,
+            });
         }
     }
 
-    let mut worker_available_ms = vec![0_u64; worker_count.max(1)];
-    let mut worker_busy_ms = vec![0_u64; worker_count.max(1)];
+    let worker_count = worker_count.max(1);
+    let mut worker_available_ms = vec![0_u64; worker_count];
+    let mut worker_busy_ms = vec![0_u64; worker_count];
     let mut task_timings = Vec::with_capacity(ordered_tasks.len());
     let mut total_completion_ms = 0_u64;
     let mut total_wait_ms = 0_u64;
     let mut high_completion_ms = 0_u64;
     let mut high_count = 0_u64;
 
+    let zone_caps: HashMap<u64, u32> = SIM_ZONE_CAPS.iter().copied().collect();
+    // (finish_ms, zone_id) for every in-flight task
+    let mut active_events: Vec<SimEvent> = Vec::new();
+    let mut zone_active: HashMap<u64, u32> = HashMap::new();
+
     for task in ordered_tasks {
-        let duration_ms = task.expected_duration.as_millis() as u64;
         let worker_index = worker_available_ms
             .iter()
             .enumerate()
@@ -523,10 +588,51 @@ fn simulate_strategy(
             .map(|(index, _)| index)
             .unwrap_or(0);
 
-        let start_ms = worker_available_ms[worker_index];
-        let finish_ms = start_ms + duration_ms;
+        let mut earliest_start = worker_available_ms[worker_index];
+
+        if let Some(target_zone) = task.required_zone {
+            let cap = zone_caps.get(&target_zone).copied().unwrap_or(u32::MAX);
+
+            loop {
+                let active = zone_active.get(&target_zone).copied().unwrap_or(0);
+                if active < cap {
+                    break;
+                }
+                // Find earliest event that frees a slot in the target zone.
+                if let Some(free_at) = active_events
+                    .iter()
+                    .filter(|e| e.zone_id == target_zone)
+                    .map(|e| e.finish_ms)
+                    .min()
+                {
+                    if free_at > earliest_start {
+                        earliest_start = free_at;
+                    }
+                    // Drain all events that finish at or before earliest_start.
+                    active_events.retain(|e| {
+                        if e.finish_ms <= earliest_start {
+                            *zone_active.entry(e.zone_id).or_insert(1) =
+                                zone_active.get(&e.zone_id).copied().unwrap_or(1).saturating_sub(1);
+                            false
+                        } else {
+                            true
+                        }
+                    });
+                } else {
+                    break;
+                }
+            }
+        }
+
+        let start_ms = earliest_start;
+        let finish_ms = start_ms + task.duration_ms;
         worker_available_ms[worker_index] = finish_ms;
-        worker_busy_ms[worker_index] += duration_ms;
+        worker_busy_ms[worker_index] += task.duration_ms;
+
+        if let Some(zone_id) = task.required_zone {
+            *zone_active.entry(zone_id).or_insert(0) += 1;
+            active_events.push(SimEvent { finish_ms, zone_id });
+        }
 
         total_completion_ms += finish_ms;
         total_wait_ms += start_ms;
@@ -543,7 +649,7 @@ fn simulate_strategy(
             worker_id: worker_index as u64 + 1,
             start_ms,
             finish_ms,
-            duration_ms,
+            duration_ms: task.duration_ms,
         });
     }
 
@@ -592,6 +698,7 @@ fn simulate_round_robin_strategy(
         priority: CoreTaskPriority,
         total_duration_ms: u64,
         remaining_ms: u64,
+        required_zone: Option<u64>,
     }
 
     let mut queue: VecDeque<RoundRobinTask> = demo_plans
@@ -602,6 +709,7 @@ fn simulate_round_robin_strategy(
             priority: plan.priority,
             total_duration_ms: plan.expected_duration.as_millis() as u64,
             remaining_ms: plan.expected_duration.as_millis() as u64,
+            required_zone: plan.required_zone,
         })
         .collect();
 
@@ -613,6 +721,10 @@ fn simulate_round_robin_strategy(
     let mut task_duration_ms = HashMap::with_capacity(demo_plans.len());
     let mut task_priority = HashMap::with_capacity(demo_plans.len());
 
+    let zone_caps: HashMap<u64, u32> = SIM_ZONE_CAPS.iter().copied().collect();
+    let mut active_events: Vec<SimEvent> = Vec::new();
+    let mut zone_active: HashMap<u64, u32> = HashMap::new();
+
     while let Some(mut task) = queue.pop_front() {
         let worker_index = worker_available_ms
             .iter()
@@ -621,12 +733,51 @@ fn simulate_round_robin_strategy(
             .map(|(index, _)| index)
             .unwrap_or(0);
 
-        let start_ms = worker_available_ms[worker_index];
+        let mut earliest_start = worker_available_ms[worker_index];
+
+        if let Some(target_zone) = task.required_zone {
+            let cap = zone_caps.get(&target_zone).copied().unwrap_or(u32::MAX);
+
+            loop {
+                let active = zone_active.get(&target_zone).copied().unwrap_or(0);
+                if active < cap {
+                    break;
+                }
+                if let Some(free_at) = active_events
+                    .iter()
+                    .filter(|e| e.zone_id == target_zone)
+                    .map(|e| e.finish_ms)
+                    .min()
+                {
+                    if free_at > earliest_start {
+                        earliest_start = free_at;
+                    }
+                    active_events.retain(|e| {
+                        if e.finish_ms <= earliest_start {
+                            *zone_active.entry(e.zone_id).or_insert(1) =
+                                zone_active.get(&e.zone_id).copied().unwrap_or(1).saturating_sub(1);
+                            false
+                        } else {
+                            true
+                        }
+                    });
+                } else {
+                    break;
+                }
+            }
+        }
+
+        let start_ms = earliest_start;
         let slice_ms = task.remaining_ms.min(QUANTUM_MS);
         let finish_ms = start_ms + slice_ms;
 
         worker_available_ms[worker_index] = finish_ms;
         worker_busy_ms[worker_index] += slice_ms;
+
+        if let Some(zone_id) = task.required_zone {
+            *zone_active.entry(zone_id).or_insert(0) += 1;
+            active_events.push(SimEvent { finish_ms, zone_id });
+        }
 
         task_duration_ms.insert(task.id, task.total_duration_ms);
         task_priority.insert(task.id, task.priority);
@@ -726,28 +877,40 @@ fn control_inner(app: &AppState, action: ControlAction) -> StatusCode {
         }
         ControlAction::Stop => {
             guard.run_generation += 1;
-            guard.worker_shutdown.store(true, Ordering::SeqCst);
+
+            // Signal old threads to stop, then replace with fresh flags.
             guard.monitor_shutdown.store(true, Ordering::SeqCst);
+            guard.worker_shutdown.store(true, Ordering::SeqCst);
             guard.task_queue.close();
 
             guard.heartbeats = Arc::new(HeartbeatRegistry::new());
             guard.metrics = Arc::new(MetricsRegistry::new());
             guard.task_table = Arc::new(TaskTable::new());
             guard.task_queue = Arc::new(ThreadSafeTaskQueue::new());
+            guard.worker_shutdown = Arc::new(AtomicBool::new(false));
+            guard.monitor_shutdown = Arc::new(AtomicBool::new(false));
             guard.system_status = SystemStatus::Stopped;
             StatusCode::NO_CONTENT
         }
         ControlAction::RunDemo => {
             guard.run_generation += 1;
             let run_generation = guard.run_generation;
+
+            // Stop lingering threads from any previous run before
+            // creating fresh state for this one.
+            guard.monitor_shutdown.store(true, Ordering::SeqCst);
+            guard.worker_shutdown.store(true, Ordering::SeqCst);
+            guard.task_queue.close();
+
             guard.system_status = SystemStatus::Running;
             guard.heartbeats = Arc::new(HeartbeatRegistry::new());
             guard.metrics = Arc::new(MetricsRegistry::new());
             guard.task_table = Arc::new(TaskTable::new());
             guard.task_queue = Arc::new(ThreadSafeTaskQueue::new());
-            guard.worker_shutdown.store(false, Ordering::SeqCst);
+            guard.zone_manager = Arc::new(ZoneManager::new(default_zones()));
+            guard.worker_shutdown = Arc::new(AtomicBool::new(false));
             guard.worker_pause.resume();
-            guard.monitor_shutdown.store(false, Ordering::SeqCst);
+            guard.monitor_shutdown = Arc::new(AtomicBool::new(false));
 
             let config = guard.config.clone();
             let heartbeats = Arc::clone(&guard.heartbeats);
@@ -763,7 +926,7 @@ fn control_inner(app: &AppState, action: ControlAction) -> StatusCode {
 
             std::thread::spawn(move || {
                 let mut coord = CoordinatorBuilder::new(config).build(&task_table, &task_queue);
-                let robot_ids: Vec<RobotId> = (1..=coord.config.worker_count as u64).collect();
+                let robot_ids: Vec<RobotId> = (1..=coord.robots.len() as u64).collect();
                 spawn_monitor_thread(
                     Arc::clone(&heartbeats),
                     Arc::clone(&metrics),

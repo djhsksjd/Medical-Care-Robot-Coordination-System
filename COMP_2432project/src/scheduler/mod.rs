@@ -8,6 +8,7 @@ pub mod queue;
 pub mod round_robin;
 pub mod srt;
 pub mod thread_safe_queue;
+pub mod work_stealing;
 
 use crate::scheduler::fifo::FifoScheduler;
 use crate::scheduler::priority::PriorityScheduler;

@@ -8,6 +8,7 @@
 
 use std::sync::Arc;
 
+use crate::coordinator::builder::{effective_demo_task_count, effective_worker_count};
 use crate::coordinator::task_table::TaskTable;
 use crate::mm::zone_allocator::ZoneManager;
 use crate::monitor::heartbeat::HeartbeatRegistry;
@@ -46,11 +47,23 @@ impl Coordinator {
         shutdown: Arc<AtomicBool>,
         pause: Arc<PauseController>,
     ) {
-        log_info("Starting coordinator demo run");
+        let mode = if self.config.use_work_stealing {
+            "work-stealing"
+        } else {
+            "classic"
+        };
+        let worker_count = effective_worker_count(&self.config);
+        let task_count = effective_demo_task_count(&self.config);
+        log_info(format!(
+            "Starting coordinator demo run: mode={mode}, scheduler={:?}, workers={}, tasks={}",
+            self.config.scheduler, worker_count, task_count
+        ));
 
         // 确保标志位处于运行状态。
         shutdown.store(false, Ordering::SeqCst);
         pause.resume();
+
+        metrics.mark_demo_start();
 
         let pool = WorkerPool::new(
             self.robots.clone(),
@@ -58,12 +71,21 @@ impl Coordinator {
             task_table,
             zone_manager,
             heartbeats,
-            metrics,
+            Arc::clone(&metrics),
             shutdown,
             pause,
+            effective_demo_task_count(&self.config),
+            self.config.use_work_stealing,
         );
         pool.run_blocking();
 
-        log_info("Coordinator demo run finished");
+        metrics.mark_demo_end();
+        let makespan_ms = metrics.makespan_ms();
+        let (global_metrics, _) = metrics.snapshot();
+
+        log_info(format!(
+            "Coordinator demo run finished: mode={mode}, makespan_ms={makespan_ms}, completed_tasks={}",
+            global_metrics.completed_tasks
+        ));
     }
 }

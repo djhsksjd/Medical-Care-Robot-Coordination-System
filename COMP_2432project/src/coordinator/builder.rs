@@ -13,6 +13,25 @@ use crate::types::zone::ZoneId;
 use crate::util::id_generator::next_task_id;
 use std::time::Duration;
 
+pub const STRESS_TEST_WORKER_COUNT: usize = 12;
+pub const STRESS_TEST_TASK_COUNT: usize = 108;
+
+pub fn effective_worker_count(config: &Config) -> usize {
+    if config.use_stress_preset {
+        STRESS_TEST_WORKER_COUNT
+    } else {
+        config.worker_count
+    }
+}
+
+pub fn effective_demo_task_count(config: &Config) -> usize {
+    if config.use_stress_preset {
+        STRESS_TEST_TASK_COUNT
+    } else {
+        config.demo_task_count
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct DemoTaskPlan {
     pub sequence: u64,
@@ -23,114 +42,140 @@ pub struct DemoTaskPlan {
     pub required_zone: Option<ZoneId>,
 }
 
-const BASE_DEMO_TASKS: [(&str, TaskPriority, u64, &str); 18] = [
+// Zone IDs: ICU = 1, Ward = 2, OR = 3
+//
+// Design rationale: 10/18 tasks target ICU (cap 2) to create a severe
+// bottleneck there, while Ward (cap 2) and OR (cap 1) remain lighter.
+// In classic mode a worker blocks when its task's zone is full; in
+// work-stealing mode the worker skips the blocked task and picks one
+// whose zone has capacity — this is where the measurable difference
+// comes from.  Duration variance (2 s – 16 s) amplifies the effect.
+const BASE_DEMO_TASKS: [(&str, TaskPriority, u64, &str, Option<ZoneId>); 18] = [
     (
         "Emergency ICU medicine delivery",
         TaskPriority::High,
-        4,
+        3,
         "Urgent medication shipment to ICU beds.",
+        Some(1), // ICU
     ),
     (
         "Bulk linen transfer - west ward",
         TaskPriority::Low,
-        12,
+        14,
         "Large but non-urgent transport workload.",
+        Some(2), // Ward
     ),
     (
         "STAT blood sample dispatch",
         TaskPriority::High,
-        3,
+        2,
         "Time-sensitive specimen trip to the lab.",
+        Some(3), // OR
     ),
     (
-        "Waste removal batch A",
-        TaskPriority::Low,
-        9,
-        "Scheduled sanitation pickup with long travel path.",
+        "ICU critical-care equipment setup",
+        TaskPriority::High,
+        5,
+        "Assembling and calibrating bedside monitors.",
+        Some(1), // ICU
     ),
     (
         "Ward meal delivery - north",
         TaskPriority::Normal,
-        5,
+        4,
         "Routine meal drop-off across patient rooms.",
+        Some(2), // Ward
     ),
     (
         "OR sterilization prep",
         TaskPriority::High,
         6,
         "Pre-op cleaning tools must arrive before surgery starts.",
+        Some(3), // OR
     ),
     (
-        "Supply restock - pediatrics",
+        "ICU supply restock - pediatrics",
         TaskPriority::Normal,
-        7,
-        "Restock consumables for the pediatrics station.",
+        8,
+        "Restock consumables for the pediatrics ICU station.",
+        Some(1), // ICU
     ),
     (
-        "Deep clean corridor east",
+        "Deep clean ICU corridor east",
         TaskPriority::Low,
-        14,
-        "Long-running cleaning route with low urgency.",
+        16,
+        "Long-running cleaning route with low urgency (ICU wing).",
+        Some(1), // ICU
     ),
     (
-        "Urgent pharmacy pickup",
+        "Urgent pharmacy pickup - ICU",
         TaskPriority::High,
-        4,
-        "Prescription needs to reach nurses quickly.",
+        3,
+        "Prescription needs to reach ICU nurses quickly.",
+        Some(1), // ICU
     ),
     (
         "Discharge document transport",
         TaskPriority::Normal,
-        5,
+        4,
         "Deliver paperwork to the discharge desk.",
+        Some(2), // Ward
     ),
     (
         "Lab specimen shuttle",
         TaskPriority::High,
-        3,
+        2,
         "Fast sample handoff before testing window closes.",
+        Some(3), // OR
     ),
     (
-        "Waste removal batch B",
-        TaskPriority::Low,
-        10,
-        "Second sanitation sweep for the lower floors.",
-    ),
-    (
-        "Infusion pump delivery",
+        "ICU infusion pump delivery",
         TaskPriority::High,
-        4,
-        "Critical device delivery for patient treatment.",
+        3,
+        "Critical device delivery for ICU patient treatment.",
+        Some(1), // ICU
     ),
     (
-        "UV disinfection - ward 3",
+        "Ward UV disinfection - ward 3",
         TaskPriority::Normal,
-        8,
-        "Medium-priority hygiene cycle.",
+        7,
+        "Medium-priority hygiene cycle for ward section.",
+        Some(2), // Ward
     ),
     (
-        "Laundry return - south wing",
+        "Emergency ICU oxygen cylinder",
+        TaskPriority::High,
+        5,
+        "Urgent respiratory support delivery to ICU.",
+        Some(1), // ICU
+    ),
+    (
+        "Ward laundry return - south wing",
         TaskPriority::Low,
         9,
         "Bulky transport with no immediate deadline.",
+        Some(2), // Ward
     ),
     (
-        "Emergency oxygen cylinder",
-        TaskPriority::High,
-        6,
-        "Urgent respiratory support delivery.",
-    ),
-    (
-        "Night medicine refill",
+        "ICU monitoring setup - annex",
         TaskPriority::Normal,
-        7,
-        "Routine refill before the next medication round.",
+        10,
+        "Install and configure monitoring in ICU annex beds.",
+        Some(1), // ICU
+    ),
+    (
+        "Night medicine refill - ICU",
+        TaskPriority::Normal,
+        6,
+        "Routine refill before the next ICU medication round.",
+        Some(1), // ICU
     ),
     (
         "Terminal cleaning - ICU annex",
         TaskPriority::Low,
-        12,
-        "Long final cleaning sweep for the annex.",
+        15,
+        "Long final cleaning sweep for the ICU annex.",
+        Some(1), // ICU
     ),
 ];
 
@@ -141,7 +186,7 @@ pub fn demo_task_plans(count: usize) -> Vec<DemoTaskPlan> {
         .map(|index| {
             let sequence = index as u64 + 1;
             let cycle = index / BASE_DEMO_TASKS.len();
-            let (name, priority, duration_secs, description) =
+            let (name, priority, duration_secs, description, required_zone) =
                 BASE_DEMO_TASKS[index % BASE_DEMO_TASKS.len()];
 
             DemoTaskPlan {
@@ -158,7 +203,7 @@ pub fn demo_task_plans(count: usize) -> Vec<DemoTaskPlan> {
                 } else {
                     format!("{description} Repeated workload wave {}.", cycle + 1)
                 },
-                required_zone: None,
+                required_zone,
             }
         })
         .collect()
@@ -190,8 +235,10 @@ impl CoordinatorBuilder {
     pub fn build(self, task_table: &TaskTable, task_queue: &ThreadSafeTaskQueue) -> Coordinator {
         // Set up the configured scheduler and seed it with demo tasks.
         let mut scheduler = SchedulerStrategy::new(self.config.scheduler);
+        let effective_task_count = effective_demo_task_count(&self.config);
+        let effective_worker_count = effective_worker_count(&self.config);
 
-        for plan in demo_task_plans(self.config.demo_task_count) {
+        for plan in demo_task_plans(effective_task_count) {
             let mut task = Task::new(next_task_id(), plan.name, plan.expected_duration);
             task.priority = plan.priority;
             task.required_zone = plan.required_zone;
@@ -206,8 +253,8 @@ impl CoordinatorBuilder {
         }
 
         // Create multiple robots based on worker_count.
-        let mut robots = Vec::with_capacity(self.config.worker_count);
-        for i in 0..self.config.worker_count {
+        let mut robots = Vec::with_capacity(effective_worker_count);
+        for i in 0..effective_worker_count {
             robots.push(Robot::new(i as u64 + 1, format!("robot-{}", i + 1)));
         }
 
