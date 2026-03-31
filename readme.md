@@ -16,6 +16,49 @@ This project implements a lightweight task scheduling and monitoring kernel for 
 
 The project also provides a React-based frontend Dashboard that polls `/api/state` in real time for system status (task list, robot states, zone utilization, configuration, and metrics) and allows parameter adjustments and demo runs via `/api/config` and `/api/system/control`.
 
+## CLI Scheduling Report (Rust-only submission friendly)
+
+If you can only submit Rust source files, you can still demonstrate the “frontend” information using the built-in **CLI scheduling report** binary (`cli`). It prints:
+- The chosen configuration (scheduler / workers / task count / work-stealing / stress preset)
+- The demo input task list
+- Per-scheduler strategy metrics (makespan, average completion, urgent completion, worker load)
+- A final comparison summary table
+
+### How to run
+
+From the `COMP_2432project/` directory:
+
+```bash
+cargo run --bin cli
+```
+
+This starts **interactive mode** (the program will prompt for parameters, print the report, and allow quitting with `q`).
+
+### Parameters (same semantics as the frontend config)
+
+- **Scheduler**: `-s, --scheduler <KIND>`
+  - `fifo` | `priority` | `roundrobin` (or `rr`) | `srt`
+- **Worker robots**: `-w, --workers <N>`
+- **Demo tasks**: `-t, --tasks <N>`
+- **Work stealing mode**: `--work-stealing` (or `--ws`)
+- **Stress preset**: `--stress` (forces 12 workers, 108 tasks)
+
+### Examples
+
+```bash
+# Default: FIFO, 9 workers, 20 demo tasks
+cargo run --bin cli
+
+# Priority scheduler, 6 workers, 18 tasks
+cargo run --bin cli -- -s priority -w 6 -t 18
+
+# Stress preset
+cargo run --bin cli -- --stress
+
+# SRT with work stealing enabled
+cargo run --bin cli -- -s srt --work-stealing
+```
+
 ---
 
 ## System Control Semantics (Stop / Pause / Reset)
