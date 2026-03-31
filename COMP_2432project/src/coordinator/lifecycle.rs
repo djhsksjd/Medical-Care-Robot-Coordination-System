@@ -1,10 +1,10 @@
 //! System lifecycle management for the coordinator.
 //! Wires together scheduler, workers, and monitoring for demo runs.
 //!
-//! 可以把 `Coordinator` 看成是本项目里的「内核核心」：
-//! - 由 builder 负责初始化调度器、Robot 集合与配置
-//! - 在 `run_demo` 中把调度器 + WorkerPool + 监控子系统按顺序串起来
-//! - 对外只暴露一个简单的入口，方便 HTTP API 或 examples 直接调用
+//! Think of `Coordinator` as the kernel core of this project:
+//! - The builder initializes the scheduler, robot set, and configuration
+//! - `run_demo` wires together the scheduler, WorkerPool, and monitoring subsystems
+//! - Exposes a simple entry point for the HTTP API or examples to call directly
 
 use std::sync::Arc;
 
@@ -59,7 +59,7 @@ impl Coordinator {
             self.config.scheduler, worker_count, task_count
         ));
 
-        // 确保标志位处于运行状态。
+        // Ensure flags are in the running state.
         shutdown.store(false, Ordering::SeqCst);
         pause.resume();
 

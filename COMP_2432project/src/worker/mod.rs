@@ -1,8 +1,8 @@
 //! Worker module representing user-space style workers.
-//! 从概念上对应「用户态进程/线程」，在本项目中由 RobotWorker + WorkerPool 组成：
-//! - robot：绑定到单个 Robot 的执行单元
-//! - pool：管理多台 RobotWorker 的调度循环
-//! - state / lifecycle：抽象 Worker 的状态与生命周期管理
+//! Conceptually analogous to user-space processes/threads, composed of RobotWorker + WorkerPool:
+//! - robot: execution unit bound to a single Robot
+//! - pool: scheduling loop managing multiple RobotWorkers
+//! - state / lifecycle: worker state and lifecycle abstractions
 
 pub mod lifecycle;
 pub mod pool;

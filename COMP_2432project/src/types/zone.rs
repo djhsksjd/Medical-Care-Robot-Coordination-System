@@ -1,5 +1,5 @@
 //! Zone type definitions for resource or physical areas.
-//! 可以理解为医院中受控的物理区域，类似 OS 里的「内存分区 / NUMA node」等资源域。
+//! Represents controlled physical areas in a hospital, analogous to memory zones / NUMA nodes in an OS.
 
 /// Unique identifier for a zone.
 pub type ZoneId = u64;

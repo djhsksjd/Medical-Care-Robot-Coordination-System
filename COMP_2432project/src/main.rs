@@ -1,6 +1,6 @@
 //! HTTP API entry point for the scheduler demo.
-//! 这里相当于「用户态入口」，启动一个基于 axum 的 HTTP 服务器，
-//! 把内核协调器的状态以 JSON 形式暴露给前端 Dashboard 使用。
+//! Serves as the user-space entry, launching an axum-based HTTP server
+//! that exposes the kernel coordinator's state as JSON for the frontend dashboard.
 
 use std::env;
 use std::net::SocketAddr;

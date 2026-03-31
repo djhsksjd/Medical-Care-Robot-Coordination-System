@@ -1,5 +1,5 @@
 //! FIFO scheduling policy.
-//! 最简单的调度策略：严格先来先服务，不考虑优先级与时间片。
+//! The simplest scheduling strategy: strict first-come-first-served, ignoring priority and time slices.
 
 use crate::scheduler::queue::TaskQueue;
 use crate::types::error::{Error, Result};

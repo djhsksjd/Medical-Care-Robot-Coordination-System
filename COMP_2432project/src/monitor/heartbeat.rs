@@ -1,8 +1,8 @@
 //! Heartbeat monitoring implementation.
 //! Track per-robot liveness timestamps for health checking.
 //!
-//! 在类操作系统的类比下，相当于为每个「CPU / Robot」维护一个心跳时间戳，
-//! 便于上层的健康检查逻辑判断该机器人是否「离线」或「卡死」。
+//! In OS terms, this maintains a heartbeat timestamp for each CPU/Robot
+//! so the upper-layer health checker can determine whether a robot is offline or stuck.
 
 use std::collections::HashMap;
 use std::time::{Duration, Instant};

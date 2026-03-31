@@ -1,6 +1,6 @@
 //! Builder for assembling a configured coordinator instance.
-//! 负责根据 `Config` 构造出一个可运行的 `Coordinator`，
-//! 包括：初始化调度器、预填充 Demo 任务、按 `worker_count` 创建多台 Robot。
+//! Constructs a runnable `Coordinator` from a `Config`, including
+//! initializing the scheduler, pre-populating demo tasks, and creating robots per `worker_count`.
 
 use crate::coordinator::lifecycle::Coordinator;
 use crate::coordinator::task_table::TaskTable;

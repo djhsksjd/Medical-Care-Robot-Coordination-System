@@ -1,5 +1,5 @@
 //! Core task queue implementation for scheduling.
-//! 这是最基础的任务队列结构，为调度器提供 FIFO 语义。
+//! The fundamental task queue structure providing FIFO semantics for the scheduler.
 
 use std::collections::VecDeque;
 

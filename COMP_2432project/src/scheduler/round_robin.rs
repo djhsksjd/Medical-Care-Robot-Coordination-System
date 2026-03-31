@@ -1,6 +1,6 @@
 //! Round-robin scheduling policy.
-//! 当前运行时实现仍受非抢占式 worker 模型限制，
-//! 因此这里提供的是队列级别的 RR 入口；真正的时间片比较图由 API 层模拟。
+//! The runtime implementation is still constrained by the non-preemptive worker model,
+//! so this provides a queue-level RR entry point; the actual time-slice comparison is simulated in the API layer.
 
 use crate::scheduler::queue::TaskQueue;
 use crate::types::error::{Error, Result};

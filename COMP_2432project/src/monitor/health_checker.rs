@@ -1,9 +1,9 @@
 //! Health checker for system components.
 //! Evaluate per-robot and global health based on heartbeats and metrics.
 //!
-//! 可以把这一层理解成 OS 中「调度器 / 监控守护进程」对 CPU 和系统整体健康状态的判定：
-//! - 结合 `HeartbeatRegistry` 判断某个 Robot 是否长时间无心跳（Unreachable）
-//! - 结合 `MetricsRegistry` 的全局统计，在没有任何执行数据时把系统视为 Degraded
+//! Think of this layer as the OS scheduler/monitoring daemon's assessment of CPU and system health:
+//! - Uses `HeartbeatRegistry` to determine if a robot has been silent too long (Unreachable)
+//! - Uses `MetricsRegistry` global stats to mark the system as Degraded when no execution data exists
 
 use std::time::Duration;
 

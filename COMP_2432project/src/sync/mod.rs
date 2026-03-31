@@ -1,6 +1,6 @@
 //! Synchronization primitives module, similar to Linux `kernel/locking/`.
-//! 对标准库中的锁、原子等进行轻量封装，便于后续替换或加入额外监控。
-//! 从概念上对应 Linux 内核源码中的 `kernel/locking/`。
+//! Thin wrappers around std locks and atomics for easy replacement or additional monitoring.
+//! Conceptually corresponds to `kernel/locking/` in the Linux kernel source.
 
 pub mod atomic;
 pub mod mutex;

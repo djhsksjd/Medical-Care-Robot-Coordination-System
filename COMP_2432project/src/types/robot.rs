@@ -1,5 +1,5 @@
 //! Robot-related type definitions.
-//! 在本项目中，每个 Robot 可以类比为一颗物理 CPU 或一个执行核心。
+//! In this project, each Robot is analogous to a physical CPU or execution core.
 
 /// Unique identifier for a robot.
 pub type RobotId = u64;

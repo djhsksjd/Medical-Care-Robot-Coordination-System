@@ -1,5 +1,5 @@
 //! Task type definitions representing scheduled work units.
-//! 在类 OS 里可以认为是「进程 / 线程」的抽象，后续可以继续扩展字段以模拟更多状态。
+//! In OS terms, these serve as the process/thread abstraction; fields can be extended to model more states.
 
 use std::time::Duration;
 

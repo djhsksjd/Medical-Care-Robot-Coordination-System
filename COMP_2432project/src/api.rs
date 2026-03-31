@@ -1,6 +1,6 @@
-//! HTTP API 层，充当「内核 ↔ 前端」之间的胶水层。
-//! - 通过 `AppState` 持有 Coordinator + 监控子系统
-//! - 对外暴露 /api/state, /api/config, /api/system/control 等端点，供前端 Dashboard 调用
+//! HTTP API layer acting as the glue between the kernel and the frontend.
+//! - Holds the Coordinator and monitoring subsystems via `AppState`
+//! - Exposes endpoints such as /api/state, /api/config, /api/system/control for the frontend dashboard
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};

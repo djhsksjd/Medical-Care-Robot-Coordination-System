@@ -1,5 +1,5 @@
 //! Worker state machine definitions.
-//! 描述每个 RobotWorker 的生命周期状态，用于简化调度与监控逻辑。
+//! Describes each RobotWorker's lifecycle states to simplify scheduling and monitoring logic.
 
 /// High-level worker states.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

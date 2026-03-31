@@ -1,6 +1,6 @@
 //! Type definitions module, similar to Linux `include/`.
-//! 这里集中放置整个系统中会被广泛使用的基础类型定义（Task / Robot / Zone / Config / Error 等），
-//! 类比 Linux 内核源码树中的 `include/` 目录。
+//! Centralizes fundamental type definitions (Task / Robot / Zone / Config / Error, etc.)
+//! used throughout the system, analogous to the `include/` directory in the Linux kernel source tree.
 
 pub mod config;
 pub mod error;

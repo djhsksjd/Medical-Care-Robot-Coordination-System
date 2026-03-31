@@ -1,9 +1,9 @@
 //! Metrics collection for monitoring.
 //! Track basic per-robot and global scheduler metrics.
 //!
-//! 在类操作系统语义下，可以把这里看成是 /proc 里导出的统计信息：
-//! - RobotMetrics ≈ 每个 CPU 的运行统计（完成任务数、累计运行时间）
-//! - GlobalMetrics ≈ 整个系统级别的吞吐与平均延迟
+//! In OS-like semantics, think of this as the statistics exported via /proc:
+//! - RobotMetrics ~ per-CPU execution stats (completed tasks, cumulative run time)
+//! - GlobalMetrics ~ system-wide throughput and average latency
 
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
@@ -12,7 +12,7 @@ use crate::sync::mutex::Mutex;
 use crate::types::robot::RobotId;
 use crate::types::zone::ZoneId;
 
-/// 每个机器人的本地统计信息，类似「某个 CPU 上完成了多少个进程」。
+/// Per-robot local statistics, analogous to how many processes a given CPU has completed.
 #[derive(Debug, Default, Clone)]
 pub struct RobotMetrics {
     pub completed_tasks: u64,
@@ -34,7 +34,7 @@ impl RobotMetrics {
     }
 }
 
-/// 全局统计信息，聚合所有机器人执行情况。
+/// Global statistics aggregating execution data from all robots.
 #[derive(Debug, Default, Clone)]
 pub struct GlobalMetrics {
     pub completed_tasks: u64,

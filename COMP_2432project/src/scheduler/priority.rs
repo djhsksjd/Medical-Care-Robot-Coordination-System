@@ -1,8 +1,8 @@
 //! Priority-based scheduling policy.
-//! 当前实现为「非抢占式优先级调度」：
-//! - High 优先于 Normal，Normal 优先于 Low
-//! - 同一优先级内部保持 FIFO，便于行为可预测
-//! - 预留后续扩展为真正的抢占式调度
+//! Non-preemptive priority scheduling:
+//! - High takes precedence over Normal, Normal over Low
+//! - FIFO ordering within the same priority band for predictable behavior
+//! - Extensible to true preemptive scheduling in the future
 
 use crate::scheduler::queue::TaskQueue;
 use crate::types::error::{Error, Result};

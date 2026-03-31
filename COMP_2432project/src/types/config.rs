@@ -40,9 +40,9 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             scheduler: SchedulerKind::Fifo,
-            worker_count: 9, //多机器人数量
-            demo_task_count: 20,//task数量
-            // 默认走 classic，便于前端通过开关/实验按钮显式对比两种模式。
+            worker_count: 9,
+            demo_task_count: 20,
+            // Default to classic mode so the frontend can explicitly compare both modes via toggle.
             use_work_stealing: false,
             use_stress_preset: false,
         }

@@ -1,7 +1,7 @@
 //! Smallest remaining time scheduling policy.
-//! 当前实现为基于任务预计执行时间的非抢占式最短剩余时间优先：
-//! - 预计剩余时间更短的任务优先执行
-//! - 若时间相同，则保持较小任务 id 在前，保证行为稳定可预测
+//! Non-preemptive shortest-remaining-time-first based on expected execution duration:
+//! - Tasks with shorter expected remaining time are executed first
+//! - Ties are broken by smaller task id to ensure stable, predictable behavior
 
 use crate::types::error::{Error, Result};
 use crate::types::task::Task;

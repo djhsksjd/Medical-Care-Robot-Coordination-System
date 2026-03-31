@@ -1,5 +1,5 @@
 //! Background monitoring thread.
-//! 周期性地对系统健康状态进行评估，并输出日志，模拟 watchdog / systemd 风格的守护进程。
+//! Periodically evaluates system health and logs results, simulating a watchdog/systemd-style daemon.
 
 use std::sync::Arc;
 use std::thread;
@@ -12,10 +12,10 @@ use crate::sync::atomic::{AtomicBool, Ordering};
 use crate::types::robot::RobotId;
 use crate::util::logger::log_info;
 
-/// 启动一个长期运行的监控线程。
+/// Spawn a long-running monitoring thread.
 ///
-/// - `shutdown` 为 true 时线程会在下一轮循环安全退出。
-/// - 线程每 `interval` 秒钟采集一次快照并输出到日志。
+/// - The thread exits safely on the next loop iteration when `shutdown` is set to true.
+/// - Takes a snapshot and logs it every `interval`.
 pub fn spawn_monitor_thread(
     heartbeats: Arc<HeartbeatRegistry>,
     metrics: Arc<MetricsRegistry>,

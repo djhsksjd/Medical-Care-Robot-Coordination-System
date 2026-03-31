@@ -1,8 +1,8 @@
 //! Status reporting utilities.
 //! Aggregate metrics and health into a compact snapshot for external consumers.
 //!
-//! 这一层主要负责把内部的监控数据（心跳 + 指标 + 健康状态）整理成一个「拍照快照」，
-//! 供上层 HTTP API / 前端 Dashboard 使用，避免前端直接依赖内部复杂的数据结构。
+//! Assembles internal monitoring data (heartbeats + metrics + health) into a compact snapshot
+//! for the HTTP API / frontend dashboard, avoiding direct dependency on complex internal structures.
 
 use std::collections::HashMap;
 use std::time::Duration;
@@ -12,7 +12,7 @@ use crate::monitor::heartbeat::HeartbeatRegistry;
 use crate::monitor::metrics::{GlobalMetrics, MetricsRegistry, RobotMetrics};
 use crate::types::robot::RobotId;
 
-/// 前端或 API 所关心的「单个机器人」监控信息。
+/// Per-robot monitoring information consumed by the frontend or API.
 #[derive(Debug, Clone)]
 pub struct RobotReport {
     pub robot_id: RobotId,
@@ -20,7 +20,7 @@ pub struct RobotReport {
     pub metrics: RobotMetrics,
 }
 
-/// 整个系统级别的监控快照。
+/// System-wide monitoring snapshot.
 #[derive(Debug, Clone)]
 pub struct SystemReport {
     pub health: SystemHealth,
