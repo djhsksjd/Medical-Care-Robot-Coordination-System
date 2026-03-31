@@ -312,7 +312,8 @@ fn snapshot_state_inner(app: &AppState) -> SystemState {
     let effective_tasks = effective_demo_task_count(&guard.config);
     let effective_workers = effective_worker_count(&guard.config);
     let demo_plans = demo_task_plans(effective_tasks);
-    let scheduling_analysis = build_scheduling_analysis(&demo_plans, effective_workers);
+    let scheduling_analysis =
+        build_scheduling_analysis(&demo_plans, effective_workers, guard.config.use_work_stealing);
     let task_snapshots = guard.task_table.all();
 
     let running_tasks_by_robot: HashMap<RobotId, u64> = task_snapshots
@@ -459,6 +460,7 @@ fn map_priority(priority: CoreTaskPriority) -> TaskPriority {
 fn build_scheduling_analysis(
     demo_plans: &[DemoTaskPlan],
     worker_count: usize,
+    use_work_stealing: bool,
 ) -> SchedulingAnalysis {
     let input_tasks = demo_plans
         .iter()
@@ -474,10 +476,20 @@ fn build_scheduling_analysis(
 
     let worker_count = worker_count.max(1);
     let mut strategies = vec![
-        simulate_strategy(SchedulerKind::Fifo, demo_plans, worker_count),
-        simulate_strategy(SchedulerKind::Priority, demo_plans, worker_count),
-        simulate_strategy(SchedulerKind::RoundRobin, demo_plans, worker_count),
-        simulate_strategy(SchedulerKind::Srt, demo_plans, worker_count),
+        simulate_strategy(SchedulerKind::Fifo, demo_plans, worker_count, use_work_stealing),
+        simulate_strategy(
+            SchedulerKind::Priority,
+            demo_plans,
+            worker_count,
+            use_work_stealing,
+        ),
+        simulate_strategy(
+            SchedulerKind::RoundRobin,
+            demo_plans,
+            worker_count,
+            use_work_stealing,
+        ),
+        simulate_strategy(SchedulerKind::Srt, demo_plans, worker_count, use_work_stealing),
     ];
 
     let fifo_summary = strategies
@@ -535,8 +547,11 @@ fn simulate_strategy(
     scheduler_kind: SchedulerKind,
     demo_plans: &[DemoTaskPlan],
     worker_count: usize,
+    use_work_stealing: bool,
 ) -> StrategySummary {
     if matches!(scheduler_kind, SchedulerKind::RoundRobin) {
+        // Round-robin already slices work; keep the existing baseline simulation.
+        // (If needed later, we can extend RR to model zone-aware skipping too.)
         return simulate_round_robin_strategy(demo_plans, worker_count);
     }
 
@@ -584,51 +599,103 @@ fn simulate_strategy(
     let mut active_events: Vec<SimEvent> = Vec::new();
     let mut zone_active: HashMap<u64, u32> = HashMap::new();
 
-    for task in ordered_tasks {
-        let worker_index = worker_available_ms
-            .iter()
-            .enumerate()
-            .min_by_key(|(index, available_at)| (**available_at, *index))
-            .map(|(index, _)| index)
-            .unwrap_or(0);
+    // Helper: update zone_active by draining finished events up to time t.
+    let drain_to = |t: u64,
+                        active_events: &mut Vec<SimEvent>,
+                        zone_active: &mut HashMap<u64, u32>| {
+        active_events.retain(|e| {
+            if e.finish_ms <= t {
+                *zone_active.entry(e.zone_id).or_insert(1) =
+                    zone_active.get(&e.zone_id).copied().unwrap_or(1).saturating_sub(1);
+                false
+            } else {
+                true
+            }
+        });
+    };
 
-        let mut earliest_start = worker_available_ms[worker_index];
+    let mut remaining = ordered_tasks;
 
-        if let Some(target_zone) = task.required_zone {
-            let cap = zone_caps.get(&target_zone).copied().unwrap_or(u32::MAX);
+    while let Some(worker_index) = worker_available_ms
+        .iter()
+        .enumerate()
+        .min_by_key(|(index, available_at)| (**available_at, *index))
+        .map(|(index, _)| index)
+    {
+        if remaining.is_empty() {
+            break;
+        }
 
-            loop {
-                let active = zone_active.get(&target_zone).copied().unwrap_or(0);
-                if active < cap {
-                    break;
-                }
-                // Find earliest event that frees a slot in the target zone.
-                if let Some(free_at) = active_events
-                    .iter()
-                    .filter(|e| e.zone_id == target_zone)
-                    .map(|e| e.finish_ms)
-                    .min()
-                {
-                    if free_at > earliest_start {
-                        earliest_start = free_at;
+        let t = worker_available_ms[worker_index];
+        drain_to(t, &mut active_events, &mut zone_active);
+
+        // Classic mode: take tasks in order, but wait if its zone is full.
+        // Work-stealing mode: scan forward to find a task whose zone has capacity at time t.
+        let mut pick_idx: Option<usize> = None;
+        if use_work_stealing {
+            for (idx, task) in remaining.iter().enumerate() {
+                match task.required_zone {
+                    None => {
+                        pick_idx = Some(idx);
+                        break;
                     }
-                    // Drain all events that finish at or before earliest_start.
-                    active_events.retain(|e| {
-                        if e.finish_ms <= earliest_start {
-                            *zone_active.entry(e.zone_id).or_insert(1) =
-                                zone_active.get(&e.zone_id).copied().unwrap_or(1).saturating_sub(1);
-                            false
-                        } else {
-                            true
+                    Some(z) => {
+                        let cap = zone_caps.get(&z).copied().unwrap_or(u32::MAX);
+                        let active = zone_active.get(&z).copied().unwrap_or(0);
+                        if active < cap {
+                            pick_idx = Some(idx);
+                            break;
                         }
-                    });
-                } else {
-                    break;
+                    }
+                }
+            }
+        } else {
+            pick_idx = Some(0);
+        }
+
+        let idx = if let Some(idx) = pick_idx {
+            idx
+        } else {
+            // No zone has capacity at time t (only possible in stealing mode).
+            // Advance time to the next zone-free event and retry.
+            let next_t = active_events
+                .iter()
+                .map(|e| e.finish_ms)
+                .min()
+                .unwrap_or(t);
+            worker_available_ms[worker_index] = next_t;
+            continue;
+        };
+
+        let task = remaining.remove(idx);
+
+        let mut start_ms = worker_available_ms[worker_index];
+        if !use_work_stealing {
+            // In classic mode we may need to block until the task's zone frees up.
+            if let Some(target_zone) = task.required_zone {
+                let cap = zone_caps.get(&target_zone).copied().unwrap_or(u32::MAX);
+                loop {
+                    drain_to(start_ms, &mut active_events, &mut zone_active);
+                    let active = zone_active.get(&target_zone).copied().unwrap_or(0);
+                    if active < cap {
+                        break;
+                    }
+                    let free_at = active_events
+                        .iter()
+                        .filter(|e| e.zone_id == target_zone)
+                        .map(|e| e.finish_ms)
+                        .min();
+                    if let Some(free_at) = free_at {
+                        start_ms = free_at.max(start_ms);
+                    } else {
+                        break;
+                    }
                 }
             }
         }
 
-        let start_ms = earliest_start;
+        drain_to(start_ms, &mut active_events, &mut zone_active);
+
         let finish_ms = start_ms + task.duration_ms;
         worker_available_ms[worker_index] = finish_ms;
         worker_busy_ms[worker_index] += task.duration_ms;
@@ -968,7 +1035,7 @@ mod tests {
 
     #[test]
     fn priority_finishes_urgent_work_faster_than_fifo_on_long_demo_input() {
-        let analysis = build_scheduling_analysis(&demo_task_plans(18), 3);
+        let analysis = build_scheduling_analysis(&demo_task_plans(18), 3, false);
         let fifo = analysis
             .strategies
             .iter()
@@ -988,7 +1055,7 @@ mod tests {
 
     #[test]
     fn srt_improves_average_completion_time_over_fifo() {
-        let analysis = build_scheduling_analysis(&demo_task_plans(18), 3);
+        let analysis = build_scheduling_analysis(&demo_task_plans(18), 3, false);
         let fifo = analysis
             .strategies
             .iter()
@@ -1008,7 +1075,7 @@ mod tests {
 
     #[test]
     fn round_robin_strategy_is_included_in_analysis() {
-        let analysis = build_scheduling_analysis(&demo_task_plans(18), 3);
+        let analysis = build_scheduling_analysis(&demo_task_plans(18), 3, false);
         let round_robin = analysis
             .strategies
             .iter()
