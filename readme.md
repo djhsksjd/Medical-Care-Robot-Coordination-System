@@ -16,6 +16,11 @@ This project implements a lightweight task scheduling and monitoring kernel for 
 
 The project also provides a React-based frontend Dashboard that polls `/api/state` in real time for system status (task list, robot states, zone utilization, configuration, and metrics) and allows parameter adjustments and demo runs via `/api/config` and `/api/system/control`.
 
+##This project is divided into two parts: the frontend and the backend. The frontend is built based on React and is used for the visual demonstration of system status; the backend is implemented using Rust and is responsible for core concurrency control, task scheduling, and synchronization logic.
+##When the project is running, you can demonstrate the system functions in two ways:
+- Run the CLI program directly: No frontend is needed, and the system scheduling, robot status, and monitoring indicators can be fully displayed only through the command-line interface;
+- Run the main function to start the backend service: Combined with the frontend page, the real-time system running status can be displayed through the visual interface.
+
 ## CLI Scheduling Report (Rust-only submission friendly)
 
 If you can only submit Rust source files, you can still demonstrate the “frontend” information using the built-in **CLI scheduling report** binary (`cli`). It prints:
