@@ -1,194 +1,314 @@
-use std::io::{self, Write};
-use std::thread;
-use std::time::Duration;
+use std::env;
+use std::process;
 
-use COMP_2432project::api::{AppState, ControlAction, SystemStatus};
+use COMP_2432project::api::{AppState, TaskPriority};
+use COMP_2432project::coordinator::builder::{effective_demo_task_count, effective_worker_count};
 use COMP_2432project::types::config::{Config, SchedulerKind};
 
+const SEP: &str = "========================================================================";
+const DASH: &str = "------------------------------------------------------------------------";
+
 fn main() {
-    let app = AppState::new();
+    let args: Vec<String> = env::args().skip(1).collect();
 
-    println!("Project Blaze CLI");
-    println!("Type `help` to see commands.");
-
-    let mut line = String::new();
-    loop {
-        print!("blaze> ");
-        let _ = io::stdout().flush();
-        line.clear();
-
-        if io::stdin().read_line(&mut line).is_err() {
-            println!("Failed to read input.");
-            continue;
-        }
-
-        let input = line.trim();
-        if input.is_empty() {
-            continue;
-        }
-
-        let mut parts = input.split_whitespace();
-        let cmd = parts.next().unwrap_or("");
-
-        match cmd {
-            "help" => print_help(),
-            "exit" | "quit" => break,
-            "state" => print_state(&app),
-            "run-demo" => {
-                let status = app.control(ControlAction::RunDemo);
-                println!("RunDemo -> {status}");
-            }
-            "pause" => {
-                let status = app.control(ControlAction::Pause);
-                println!("Pause -> {status}");
-            }
-            "resume" | "start" => {
-                let status = app.control(ControlAction::Start);
-                println!("Start/Resume -> {status}");
-            }
-            "stop" => {
-                let status = app.control(ControlAction::Stop);
-                println!("Stop -> {status}");
-            }
-            "watch" => {
-                let secs: u64 = parts.next().and_then(|s| s.parse().ok()).unwrap_or(1);
-                watch_state(&app, Duration::from_secs(secs));
-            }
-            "config" => match parts.next() {
-                Some("show") | None => print_config(&app),
-                Some("set") => handle_config_set(&app, parts.collect()),
-                Some(other) => println!(
-                    "Unknown config subcommand: {other}. Try `config show` or `config set ...`."
-                ),
-            },
-            other => println!("Unknown command: {other}. Type `help`."),
-        }
-    }
-
-    println!("Bye.");
-}
-
-fn print_help() {
-    println!(
-        r#"Commands:
-  help                      Show this help
-  state                     Print a concise system snapshot
-  watch [interval_secs]     Poll and print state repeatedly (default 1s)
-
-  run-demo                  Start a demo run in background
-  pause                     Pause workers (blocking, non-busy-wait)
-  resume|start              Resume workers
-  stop                      Stop workers and reset runtime state
-
-  config show               Show current config
-  config set workers <n>    Set worker_count
-  config set tasks <n>      Set demo_task_count
-  config set scheduler <k>  Set scheduler: fifo|priority|roundrobin|srt
-
-  exit|quit                 Exit CLI
-"#
-    );
-}
-
-fn print_config(app: &AppState) {
-    let s = app.snapshot_state();
-    println!(
-        "Config: scheduler={:?}, worker_count={}, demo_task_count={}",
-        s.config.scheduler, s.config.worker_count, s.config.demo_task_count
-    );
-}
-
-fn handle_config_set(app: &AppState, args: Vec<&str>) {
-    if args.len() < 2 {
-        println!("Usage: config set <workers|tasks|scheduler> <value>");
+    if args.iter().any(|a| a == "--help" || a == "-h") {
+        print_usage();
         return;
     }
 
-    let key = args[0];
-    let value = args[1];
-
-    let mut cfg: Config = app.snapshot_state().config;
-    match key {
-        "workers" => match value.parse::<usize>() {
-            Ok(n) if n >= 1 => cfg.worker_count = n,
-            _ => {
-                println!("Invalid worker count: {value}");
-                return;
-            }
-        },
-        "tasks" => match value.parse::<usize>() {
-            Ok(n) if n >= 1 => cfg.demo_task_count = n,
-            _ => {
-                println!("Invalid task count: {value}");
-                return;
-            }
-        },
-        "scheduler" => match value.to_ascii_lowercase().as_str() {
-            "fifo" => cfg.scheduler = SchedulerKind::Fifo,
-            "priority" => cfg.scheduler = SchedulerKind::Priority,
-            "roundrobin" | "rr" => cfg.scheduler = SchedulerKind::RoundRobin,
-            "srt" => cfg.scheduler = SchedulerKind::Srt,
-            _ => {
-                println!("Invalid scheduler kind: {value}");
-                return;
-            }
-        },
-        _ => {
-            println!("Unknown config key: {key}");
-            return;
+    let config = match parse_args(&args) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("Error: {e}");
+            eprintln!();
+            print_usage();
+            process::exit(1);
         }
-    }
+    };
 
-    app.apply_config(cfg);
-    println!("Config updated (runtime state reset).");
-}
+    let app = AppState::new();
+    app.apply_config(config.clone());
+    let state = app.snapshot_state();
+    let analysis = &state.scheduling_analysis;
 
-fn print_state(app: &AppState) {
-    let s = app.snapshot_state();
+    let ew = effective_worker_count(&config);
+    let et = effective_demo_task_count(&config);
 
-    let mut pending = 0;
-    let mut running = 0;
-    let mut finished = 0;
-    let mut failed = 0;
-    for t in &s.tasks {
-        match t.status {
-            COMP_2432project::api::TaskStatus::Pending => pending += 1,
-            COMP_2432project::api::TaskStatus::Running => running += 1,
-            COMP_2432project::api::TaskStatus::Finished => finished += 1,
-            COMP_2432project::api::TaskStatus::Failed => failed += 1,
-        }
-    }
+    // ── Header ──────────────────────────────────────────────────────
+    println!();
+    println!("{SEP}");
+    println!("    Medical Care Robot Coordination System - Scheduling Report");
+    println!("{SEP}");
+    println!();
 
+    // ── Configuration (same fields as frontend Config panel) ────────
+    println!("  Scheduler           = {}", scheduler_label(config.scheduler));
+    println!("  Worker Count        = {ew}");
+    println!("  Demo Task Count     = {et}");
     println!(
-        "Status: {:?} | tasks: total={} (pending={}, running={}, finished={}, failed={}) | throughput={} | avgLatencyMs={}",
-        s.system_status,
-        s.tasks.len(),
-        pending,
-        running,
-        finished,
-        failed,
-        s.metrics.throughput,
-        s.metrics.avg_latency_ms
+        "  Work Stealing       = {}",
+        bool_label(config.use_work_stealing)
     );
+    println!(
+        "  Stress Preset       = {}",
+        bool_label(config.use_stress_preset)
+    );
+    println!();
 
-    if !s.zones.is_empty() {
-        println!("Zones:");
-        for z in &s.zones {
+    // ── Input Tasks (same as frontend "Explicit long demo input") ───
+    println!("{SEP}");
+    println!("                       Test Data (Input Tasks)");
+    println!("{SEP}");
+    println!(
+        "  {:<4} {:<40} {:<8} {:<8} {}",
+        "#", "Task Name", "Priority", "Duration", "Zone"
+    );
+    println!("  {}", "-".repeat(70));
+    for task in &analysis.input_tasks {
+        let zone = task
+            .required_zone_id
+            .map(zone_label)
+            .unwrap_or_else(|| "-".into());
+        println!(
+            "  {:<4} {:<40} {:<8} {:<8} {}",
+            task.id,
+            &task.name,
+            priority_label(&task.priority),
+            fmt_dur(task.expected_duration_ms),
+            zone,
+        );
+    }
+    println!();
+
+    // ── Per-strategy details (same metrics as frontend StrategyCard) ─
+    for strategy in &analysis.strategies {
+        let is_current = strategy.scheduler == config.scheduler;
+        let tag = if is_current { "  * Current *" } else { "" };
+
+        println!("{SEP}");
+        println!(
+            "                    Strategy: {}{tag}",
+            scheduler_label(strategy.scheduler)
+        );
+        println!("{SEP}");
+
+        println!(
+            "  Makespan                           = {}",
+            fmt_dur(strategy.makespan_ms)
+        );
+        println!(
+            "  Avg Completion                     = {}",
+            fmt_dur(strategy.avg_completion_ms)
+        );
+        println!(
+            "  Avg Wait                           = {}",
+            fmt_dur(strategy.avg_wait_ms)
+        );
+        println!(
+            "  Urgent Avg Finish                  = {}",
+            fmt_dur(strategy.avg_high_priority_completion_ms)
+        );
+
+        if matches!(strategy.scheduler, SchedulerKind::Fifo) {
+            println!("  Vs FIFO Avg Completion             = baseline");
+            println!("  Vs FIFO Urgent                     = baseline");
+            println!("  Speedup vs FIFO                    = baseline");
+        } else {
             println!(
-                "  - {} (id={}): {}/{} activeRobots={} health={:?}",
-                z.name, z.id, z.current_tasks, z.capacity, z.active_robots, z.health
+                "  Vs FIFO Avg Completion             = {}",
+                fmt_delta(strategy.avg_completion_improvement_vs_fifo_ms)
+            );
+            println!(
+                "  Vs FIFO Urgent                     = {}",
+                fmt_delta(strategy.avg_high_priority_improvement_vs_fifo_ms)
+            );
+            let sign = if strategy.speedup_vs_fifo_pct >= 0.0 {
+                "+"
+            } else {
+                ""
+            };
+            println!(
+                "  Speedup vs FIFO                    = {sign}{:.1}%",
+                strategy.speedup_vs_fifo_pct
             );
         }
+
+        println!("  {DASH}");
+        println!("  Worker Load:");
+        for (i, &busy) in strategy.worker_busy_ms.iter().enumerate() {
+            println!(
+                "    Robot {:<3}                        = {}",
+                i + 1,
+                fmt_dur(busy)
+            );
+        }
+        println!();
+    }
+
+    // ── Final Summary (same comparison as frontend metric charts) ───
+    println!("{SEP}");
+    println!("                           Final Summary");
+    println!("{SEP}");
+    println!(
+        "  {:<12} {:<10} {:<12} {:<13} {}",
+        "Strategy", "Makespan", "Avg Compl.", "Urgent Fin.", "Speedup vs FIFO"
+    );
+    println!("  {}", "-".repeat(66));
+    for strategy in &analysis.strategies {
+        let speedup = if matches!(strategy.scheduler, SchedulerKind::Fifo) {
+            "baseline".into()
+        } else {
+            let sign = if strategy.speedup_vs_fifo_pct >= 0.0 {
+                "+"
+            } else {
+                ""
+            };
+            format!("{sign}{:.1}%", strategy.speedup_vs_fifo_pct)
+        };
+        println!(
+            "  {:<12} {:<10} {:<12} {:<13} {}",
+            scheduler_label(strategy.scheduler),
+            fmt_dur(strategy.makespan_ms),
+            fmt_dur(strategy.avg_completion_ms),
+            fmt_dur(strategy.avg_high_priority_completion_ms),
+            speedup,
+        );
+    }
+    println!("{SEP}");
+    println!();
+}
+
+// ── Helpers ─────────────────────────────────────────────────────────
+
+fn scheduler_label(kind: SchedulerKind) -> &'static str {
+    match kind {
+        SchedulerKind::Fifo => "Fifo",
+        SchedulerKind::Priority => "Priority",
+        SchedulerKind::RoundRobin => "RoundRobin",
+        SchedulerKind::Srt => "Srt",
     }
 }
 
-fn watch_state(app: &AppState, interval: Duration) {
-    loop {
-        let s = app.snapshot_state();
-        print_state(app);
-        if matches!(s.system_status, SystemStatus::Stopped) {
-            break;
-        }
-        thread::sleep(interval);
+fn bool_label(v: bool) -> &'static str {
+    if v { "ON" } else { "OFF" }
+}
+
+fn zone_label(id: u64) -> String {
+    match id {
+        1 => "ICU".into(),
+        2 => "Ward".into(),
+        3 => "OR".into(),
+        other => format!("Zone({other})"),
     }
+}
+
+fn priority_label(p: &TaskPriority) -> &'static str {
+    match p {
+        TaskPriority::Low => "Low",
+        TaskPriority::Normal => "Normal",
+        TaskPriority::High => "High",
+    }
+}
+
+fn fmt_dur(ms: u64) -> String {
+    if ms >= 1000 {
+        if ms % 1000 == 0 {
+            format!("{} s", ms / 1000)
+        } else {
+            format!("{:.1} s", ms as f64 / 1000.0)
+        }
+    } else {
+        format!("{ms} ms")
+    }
+}
+
+fn fmt_delta(ms: i64) -> String {
+    let abs = fmt_dur(ms.unsigned_abs());
+    if ms > 0 {
+        format!("{abs} faster")
+    } else if ms < 0 {
+        format!("{abs} slower")
+    } else {
+        "same as FIFO".into()
+    }
+}
+
+// ── Argument parsing (mirrors frontend Config fields exactly) ───────
+
+fn parse_args(args: &[String]) -> Result<Config, String> {
+    let mut config = Config::default();
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--scheduler" | "-s" => {
+                i += 1;
+                let val = args
+                    .get(i)
+                    .ok_or("Missing value for --scheduler")?;
+                config.scheduler = match val.to_ascii_lowercase().as_str() {
+                    "fifo" => SchedulerKind::Fifo,
+                    "priority" => SchedulerKind::Priority,
+                    "roundrobin" | "rr" => SchedulerKind::RoundRobin,
+                    "srt" => SchedulerKind::Srt,
+                    _ => return Err(format!("Unknown scheduler: {val}. Use: fifo, priority, roundrobin, srt")),
+                };
+            }
+            "--workers" | "-w" => {
+                i += 1;
+                let val = args
+                    .get(i)
+                    .ok_or("Missing value for --workers")?;
+                config.worker_count = val
+                    .parse::<usize>()
+                    .map_err(|_| format!("Invalid worker count: {val}"))?;
+                if config.worker_count < 1 {
+                    return Err("Worker count must be >= 1".into());
+                }
+            }
+            "--tasks" | "-t" => {
+                i += 1;
+                let val = args
+                    .get(i)
+                    .ok_or("Missing value for --tasks")?;
+                config.demo_task_count = val
+                    .parse::<usize>()
+                    .map_err(|_| format!("Invalid task count: {val}"))?;
+                if config.demo_task_count < 1 {
+                    return Err("Task count must be >= 1".into());
+                }
+            }
+            "--work-stealing" | "--ws" => {
+                config.use_work_stealing = true;
+            }
+            "--stress" => {
+                config.use_stress_preset = true;
+            }
+            other => {
+                return Err(format!("Unknown argument: {other}"));
+            }
+        }
+        i += 1;
+    }
+    Ok(config)
+}
+
+fn print_usage() {
+    println!(
+        r#"Usage: cli [OPTIONS]
+
+Options:
+  -s, --scheduler <KIND>  Scheduling algorithm: fifo | priority | roundrobin | srt
+                          (default: fifo)
+  -w, --workers <N>       Number of worker robots (default: 9)
+  -t, --tasks <N>         Number of demo tasks (default: 20)
+      --work-stealing     Enable work-stealing + non-blocking zone allocation
+      --stress            Use stress test preset (12 workers, 108 tasks)
+  -h, --help              Show this help message
+
+Examples:
+  cli                              Default config (Fifo, 9 workers, 20 tasks)
+  cli -s priority -w 6 -t 18      Priority scheduler, 6 workers, 18 tasks
+  cli --stress                     Stress test preset
+  cli -s srt --work-stealing       SRT scheduler with work-stealing enabled"#
+    );
 }
