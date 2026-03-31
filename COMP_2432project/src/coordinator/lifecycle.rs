@@ -37,6 +37,7 @@ impl Coordinator {
     ///
     /// - Tasks have been inserted into `task_table` and their IDs pushed into `task_queue`.
     /// - One OS thread is spawned per robot, all sharing the same registries and zone manager.
+    #[allow(clippy::too_many_arguments)]
     pub fn run_demo(
         &mut self,
         heartbeats: Arc<HeartbeatRegistry>,

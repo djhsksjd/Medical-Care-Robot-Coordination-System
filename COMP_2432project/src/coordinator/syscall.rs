@@ -13,6 +13,7 @@ use crate::sync::atomic::AtomicBool;
 use crate::worker::lifecycle::PauseController;
 
 /// Run the built-in demo scenario through the coordinator.
+#[allow(clippy::too_many_arguments)]
 pub fn run_demo(
     coordinator: &mut Coordinator,
     heartbeats: Arc<HeartbeatRegistry>,

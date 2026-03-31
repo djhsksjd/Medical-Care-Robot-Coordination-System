@@ -33,6 +33,12 @@ pub struct TaskTable {
     inner: Mutex<HashMap<TaskId, Entry>>,
 }
 
+impl Default for TaskTable {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TaskTable {
     pub fn new() -> Self {
         Self {

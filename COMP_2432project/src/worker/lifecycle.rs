@@ -77,3 +77,9 @@ impl PauseController {
         }
     }
 }
+
+impl Default for PauseController {
+    fn default() -> Self {
+        Self::new()
+    }
+}

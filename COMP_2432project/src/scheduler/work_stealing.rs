@@ -23,6 +23,12 @@ pub struct LocalTaskQueue {
     inner: Mutex<VecDeque<TaskId>>,
 }
 
+impl Default for LocalTaskQueue {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl LocalTaskQueue {
     pub fn new() -> Self {
         Self {

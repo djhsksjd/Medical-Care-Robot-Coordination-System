@@ -123,11 +123,11 @@ impl MetricsRegistry {
     /// the **previous** zone.
     pub fn record_zone_execution(&self, robot_id: RobotId, zone_id: ZoneId) {
         let mut last = self.last_zone.lock().expect("last_zone lock");
-        if let Some(&prev_zone) = last.get(&robot_id) {
-            if prev_zone != zone_id {
-                let mut zs = self.zone_switches.lock().expect("zone_switches lock");
-                *zs.entry(prev_zone).or_insert(0) += 1;
-            }
+        if let Some(&prev_zone) = last.get(&robot_id)
+            && prev_zone != zone_id
+        {
+            let mut zs = self.zone_switches.lock().expect("zone_switches lock");
+            *zs.entry(prev_zone).or_insert(0) += 1;
         }
         last.insert(robot_id, zone_id);
     }

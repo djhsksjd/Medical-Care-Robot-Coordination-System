@@ -180,7 +180,7 @@ pub struct SystemState {
     pub scheduling_analysis: SchedulingAnalysis,
 }
 
-#[derive()]
+#[derive(Debug)]
 struct SharedState {
     config: Config,
     heartbeats: Arc<HeartbeatRegistry>,
@@ -235,6 +235,12 @@ impl AppState {
                 run_generation: 0,
             })),
         }
+    }
+}
+
+impl Default for AppState {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -383,10 +389,10 @@ fn snapshot_state_inner(app: &AppState) -> SystemState {
                 crate::types::task::TaskStatus::Finished => TaskStatus::Finished,
                 crate::types::task::TaskStatus::Failed => TaskStatus::Failed,
             },
-            robot_id: snap.robot_id.map(|id| id as u64),
-            zone_id: snap.zone_id.map(|id| id as u64),
+            robot_id: snap.robot_id,
+            zone_id: snap.zone_id,
             required_zone_id: snap.task.required_zone,
-            expected_duration_ms: snap.task.expected_duration.as_secs() as u64 * 1000,
+            expected_duration_ms: snap.task.expected_duration.as_secs() * 1000,
             started_at: snap.started_at.map(|t| format!("{t:?}")),
             finished_at: snap.finished_at.map(|t| format!("{t:?}")),
         })
@@ -426,7 +432,7 @@ fn snapshot_state_inner(app: &AppState) -> SystemState {
         });
     }
 
-    let state = SystemState {
+    SystemState {
         tasks,
         robots,
         zones,
@@ -439,9 +445,7 @@ fn snapshot_state_inner(app: &AppState) -> SystemState {
         },
         system_status: guard.system_status,
         scheduling_analysis,
-    };
-
-    state
+    }
 }
 
 fn map_priority(priority: CoreTaskPriority) -> TaskPriority {
