@@ -1,353 +1,359 @@
-# Project Blaze：医疗护理机器人协调系统 需求文档
-**所属课程**：香港理工大学COMP2432 操作系统（2025–2026学年）
-**核心聚焦**：操作系统并发、同步、安全协调核心概念
-**实现要求**：轻量级OS核心，极简设计，不实现抢占、死锁预防、复杂调度策略，聚焦并发正确性
+# Project Blaze: Medical Care Robot Coordination System — Requirements Document
+**Course**: PolyU COMP2432 Operating Systems (2025–2026)
+**Core Focus**: OS concurrency, synchronization, and safe coordination concepts
+**Implementation Scope**: Lightweight OS kernel; minimalist design — no preemption, deadlock prevention, or complex scheduling policies; focused on concurrency correctness
 
-## 一、项目概览（当前实现进度）
+## 1. Project Overview (Current Implementation Progress)
 
-本项目实现了一个面向「医疗护理机器人」的轻量级任务调度与监控内核，可以类比为一个专用的小型操作系统内核：
+This project implements a lightweight task scheduling and monitoring kernel for medical care robots, analogous to a small, purpose-built OS kernel:
 
-- **Task ≈ Process**：表示一个需要被执行的护理 / 运输 / 消毒任务，带有 `id / name / priority / status / expected_duration` 等字段。
-- **Robot ≈ CPU/Core**：表示一台物理机器人（或一个逻辑执行单元），调度器会将 Task 分配到不同 Robot 上执行。
-- **Scheduler（调度器）**：当前实现了 FIFO 调度器，后续会扩展优先级调度与 Round Robin。
-- **WorkerPool（工作线程池）**：根据配置的 `worker_count` 创建多个 RobotWorker，模拟多 CPU 抢占任务的过程。
-- **Monitor（监控子系统）**：持续收集每个 Robot 的心跳、执行指标与健康状态，类似 `/proc` 统计与 watchdog。
-- **Coordinator（协调器）**：充当「内核核心」，负责把调度、工作线程、资源管理与监控整合在一起，并通过 HTTP API 暴露统一视图。
+- **Task ≈ Process**: Represents a care / transport / disinfection task to be executed, with fields such as `id / name / priority / status / expected_duration`.
+- **Robot ≈ CPU/Core**: Represents a physical robot (or a logical execution unit); the scheduler assigns Tasks to different Robots for execution.
+- **Scheduler**: Currently implements a FIFO scheduler; priority scheduling and Round Robin will be added later.
+- **WorkerPool**: Creates multiple RobotWorkers based on the configured `worker_count`, simulating multi-CPU task contention.
+- **Monitor**: Continuously collects heartbeat, execution metrics, and health status from each Robot — similar to `/proc` statistics and a watchdog.
+- **Coordinator**: Acts as the "kernel core", integrating the scheduler, worker threads, resource management, and monitoring, and exposing a unified view via an HTTP API.
 
-同时，项目还提供了一个基于 React 的前端 Dashboard，实时从 `/api/state` 拉取系统状态（任务列表、机器人状态、区域利用率、配置与指标），并通过 `/api/config` 和 `/api/system/control` 调整参数、触发 Demo 运行。
-
----
-
-## 系统控制语义说明（Stop / Pause / Reset）
-
-为了保证演示的**可重复性**与**状态可预测**，本项目对控制动作做了刻意简化（更接近“教学用内核 Demo”而不是生产系统）：
-
-- **Pause**：暂停 worker 的取任务/执行循环。实现方式为条件变量阻塞（非轮询睡眠），Resume 后立即唤醒继续运行。
-- **Start/Resume**：清除暂停状态，让 worker 继续运行。
-- **Stop**：向 worker 和 monitor 发出停止信号，并**关闭任务队列**以唤醒阻塞线程；随后会重置任务表、队列、心跳与指标等运行时状态。
-- **Update Config**：更新配置时同样会重置运行时状态，避免旧任务/旧指标与新配置混在一起影响演示观察。
-
-这种设计的取舍：
-- **优点**：每次 Demo 的起始状态一致，便于展示并发/同步效果与对比调度策略。
-- **缺点**：Stop/Config 更新后不会保留历史任务与历史指标（如果要做“可追溯历史”，需要把任务表/指标做成可持久化或按 run_id 分段存储）。
-
-> 当前状态：核心调度路径（Task → Scheduler → RobotWorker → Metrics/Heartbeat）已经打通，支持多机器人并发执行 Demo 任务，并在前端可视化监控。
+The project also provides a React-based frontend Dashboard that polls `/api/state` in real time for system status (task list, robot states, zone utilization, configuration, and metrics) and allows parameter adjustments and demo runs via `/api/config` and `/api/system/control`.
 
 ---
 
-## 二、核心业务需求
-基于医院自主机器人（配送、消毒、手术辅助）调度场景，实现**三大核心功能模块**，保障多机器人并发工作时的安全与协调，具体功能要求如下：
-### 1. 任务队列模块
-- 支持机器人任务的存储与入队；
-- 支持多机器人并发、安全地获取任务（FIFO原则）；
-- 保证共享任务队列的访问无竞态条件，状态一致。
+## System Control Semantics (Stop / Pause / Reset)
 
-### 2. 区域访问控制模块
-- 实现医院区域的互斥访问，**禁止两个机器人同时占用同一区域**；
-- 支持机器人对指定区域的申请与释放，操作并发安全。
+To ensure **repeatability** and **predictable state** during demonstrations, the control actions are intentionally simplified (closer to a "teaching kernel demo" than a production system):
 
-### 3. 健康监控模块
-- 实时跟踪所有机器人的心跳状态；
-- 支持机器人主动上报心跳；
-- 检测心跳超时的机器人，并自动将其标记为离线状态。
+- **Pause**: Suspends the worker's task-fetch/execution loop. Implemented via condition variable blocking (not spin-waiting); workers wake immediately upon Resume.
+- **Start/Resume**: Clears the paused state and lets workers continue running.
+- **Stop**: Signals workers and the monitor to stop, and **closes the task queue** to unblock waiting threads; then resets runtime state including the task table, queue, heartbeats, and metrics.
+- **Update Config**: Also resets runtime state to prevent stale tasks/metrics from mixing with the new configuration and interfering with demo observation.
 
-## 三、演示硬性需求
-实现的系统需完成**三大场景演示**，清晰体现OS核心并发、同步概念，演示效果可通过终端输出/可视化界面呈现：
-1. 多机器人线程同时并发请求、获取任务，无冲突；
-2. 多机器人申请共享区域时，实现严格互斥，无同时占用情况；
-3. 模拟单个/多个机器人心跳超时，系统成功将其标记为离线并展示状态。
+Design trade-offs:
+- **Pros**: Every demo starts from a consistent initial state, making it easy to showcase concurrency/synchronization effects and compare scheduling strategies.
+- **Cons**: Historical tasks and metrics are not preserved after Stop/Config updates (supporting traceable history would require persistent or run-id-segmented storage for tasks and metrics).
 
-## 四、技术实现需求
-### 1. 开发语言与项目规范
-- 基于**Rust**开发，提交为标准Cargo项目；
-- 项目可通过`cargo build --release`正常编译；
-- 编写覆盖合理的测试用例，所有测试通过`cargo test`验证；
-- 项目结构清晰，模块划分合理，具备可追溯的、体现开发进度的Git commit历史。
+> Current status: The core scheduling path (Task → Scheduler → RobotWorker → Metrics/Heartbeat) is fully operational, supporting multi-robot concurrent demo task execution with real-time frontend visualization.
 
-### 2. 核心技术要求
-- **并发控制**：通过线程实现多机器人并行工作，保证共享状态的安全访问；
-- **同步机制**：合理使用Mutex、RwLock、Condvar等同步原语，彻底防止竞态条件和共享状态不一致；
-- **线程协调**：多工作线程（机器人）的组织具备清晰的所有权，线程间交互逻辑正确，无异常阻塞/崩溃；
-- **代码质量**：代码可读性强，符合Rust惯用写法，实现严谨的错误处理，无无效/危险的代码写法（如无脑unwrap）。
+---
 
-## 五、交付物需求
-需按要求提交**源码、书面报告、视频演示**三类交付物，各交付物需满足严格的格式、内容与技术要求。
+## 2. Core Business Requirements
+Based on the scenario of autonomous hospital robots (delivery, disinfection, surgical assistance), the system implements **three core functional modules** to ensure safe coordination during multi-robot concurrent operation:
 
-### 1. 源码交付物
-- 包含完整的三大核心模块、机器人模拟、系统协调层代码；
-- 包含单元测试（各模块）、集成测试（多机器人并发场景）代码；
-- 项目目录结构规范，模块解耦，核心逻辑有清晰注释；
-- 无第三方冗余依赖，优先使用Rust标准库实现功能。
+### 2.1 Task Queue Module
+- Store and enqueue robot tasks;
+- Support concurrent, safe task retrieval by multiple robots (FIFO principle);
+- Guarantee race-condition-free access to the shared task queue with consistent state.
 
-### 2. 书面报告交付物
-报告需严格遵循指定结构，**各板块满足字数/字符限制**，内容完整、逻辑清晰，学术规范达标，具体要求如下：
-| 报告板块 | 字数/字符要求 | 核心内容要求 |
-|----------|---------------|--------------|
-| 摘要     | 800–1100字符  | 项目简明总结、核心挑战与解决方案、关键实现结果 |
-| 引言     | 300–500词     | 问题陈述与研究动机、项目核心目标、整体实现方法概述 |
-| 相关研究 | 400–700词     | 调研并发控制/同步技术、任务队列调度方法、资源互斥模式；对比自身实现方案 |
-| 实现     | 700–1000词    | 绘制系统架构图；详解三大模块设计与实现、同步原语选择；附核心临界区代码片段 |
-| 基准测试 | 500–700词     | 说明测试方法；验证系统正确性；分析任务吞吐量、区域访问延迟、CPU使用率等性能指标；完成可扩展性/压力测试并附图表（表格/图形） |
-| 讨论     | 最少500词     | 分析测试结果；阐述设计中的权衡选择；指出系统局限性与性能瓶颈；对比不同同步原语的使用效果；总结并发编程经验 |
-| 结论与未来工作 | 最少300词 | 总结项目成果；说明如何达成项目目标；提出系统潜在改进点；规划未来功能扩展方向 |
-| 参考文献 | 无            | 至少20篇，采用APA格式；需包含Rust官方文档、相关学术论文、技术文章 |
-- 优秀报告有公开出版机会，要求技术深度足够、写作清晰、评估全面。
+### 2.2 Zone Access Control Module
+- Implement mutual exclusion for hospital zones — **no two robots may occupy the same zone simultaneously**;
+- Support zone request and release operations with concurrency safety.
 
-### 3. 视频演示交付物
-视频时长**最大3分钟**，需清晰展示系统功能与OS核心概念，满足技术与内容要求，具体如下：
-#### 内容要求（建议结构，可选）
-1. 系统概述（30秒）：简要讲解系统架构，展示运行中的系统组件；
-2. 实机演示（2分钟）：展示多机器人并发工作，验证共享资源的安全协调效果；
-3. 代码走查（30秒）：重点展示核心同步代码，讲解一个关键设计决策。
+### 2.3 Health Monitoring Module
+- Track real-time heartbeat status of all robots;
+- Allow robots to actively report heartbeats;
+- Detect heartbeat timeouts and automatically mark timed-out robots as offline.
 
-#### 技术要求
-- 文件大小**≤50MB**，超大小可提交YouTube未列出视频并附有效链接；
-- 格式为MP4等通用视频格式，音频清晰可闻，无杂音；
-- 包含屏幕录制画面，清晰展示终端输出、系统执行过程与核心操作；
-- 需有旁白讲解，逻辑清晰，贴合演示内容。
+## 3. Demonstration Requirements
+The system must complete **three demonstration scenarios** that clearly illustrate core OS concurrency and synchronization concepts. Demo results can be presented via terminal output or a visual interface:
+1. Multiple robot threads concurrently request and acquire tasks without conflicts;
+2. Multiple robots requesting shared zones demonstrate strict mutual exclusion with no concurrent occupancy;
+3. Simulate single/multiple robot heartbeat timeouts, with the system successfully marking them as offline and displaying the updated status.
 
-## 六、评分考核需求
-项目总分100%，按**5个维度**进行考核，各维度权重与核心评分标准明确，**同步维度为核心考核点**，具体如下：
-| 考核维度 | 权重 | 核心评分标准 |
-|----------|------|--------------|
-| 学习成果A：并发控制 | 25% | 多线程安全运行，无任何竞态条件；共享状态访问符合并发安全要求 |
-| 学习成果B：同步 | 40% | 所有共享状态（任务队列、区域、健康监控）保持一致，无数据错乱/状态异常；同步原语使用合理、高效 |
-| 学习成果C：协调 | 10% | 多机器人线程间交互逻辑正确；三大演示场景可完整、无错误完成；系统无异常阻塞/崩溃 |
-| 代码质量 | 5% | 代码结构清晰、可读性强；符合Rust惯用写法；错误处理严谨、规范；测试覆盖率合理 |
-| 报告 & 演示 | 20% | 书面报告结构规范、内容完整、逻辑清晰；视频演示效果清晰、功能验证充分、讲解到位 |
+## 4. Technical Implementation Requirements
+
+### 4.1 Language and Project Standards
+- Developed in **Rust**, submitted as a standard Cargo project;
+- Must compile successfully with `cargo build --release`;
+- Write tests with reasonable coverage; all tests must pass via `cargo test`;
+- Clear project structure with well-organized modules and a traceable Git commit history reflecting development progress.
+
+### 4.2 Core Technical Requirements
+- **Concurrency Control**: Use threads to enable multi-robot parallel execution, ensuring safe access to shared state;
+- **Synchronization**: Properly use synchronization primitives (Mutex, RwLock, Condvar, etc.) to completely prevent race conditions and shared-state inconsistency;
+- **Thread Coordination**: Multi-worker (robot) thread organization with clear ownership; correct inter-thread interaction logic with no unexpected blocking or crashes;
+- **Code Quality**: Readable code following idiomatic Rust conventions; rigorous error handling; no unsafe or dangerous patterns (e.g., indiscriminate `unwrap`).
+
+## 5. Deliverables
+Three categories of deliverables are required: **source code, written report, and video demonstration**, each with strict format, content, and technical requirements.
+
+### 5.1 Source Code Deliverables
+- Complete implementation of all three core modules, robot simulation, and the system coordination layer;
+- Unit tests (per module) and integration tests (multi-robot concurrency scenarios);
+- Well-structured project directory with decoupled modules and clear comments on core logic;
+- No unnecessary third-party dependencies; prefer Rust standard library for implementation.
+
+### 5.2 Written Report Deliverables
+The report must follow a specified structure with each section meeting **word/character count limits**, and must be complete, logically coherent, and academically sound:
+
+| Report Section | Word/Character Limit | Key Content |
+|---|---|---|
+| Abstract | 800–1100 characters | Concise project summary, core challenges and solutions, key implementation results |
+| Introduction | 300–500 words | Problem statement and motivation, core project objectives, implementation approach overview |
+| Related Work | 400–700 words | Survey of concurrency control/synchronization techniques, task queue scheduling methods, resource mutual exclusion patterns; comparison with own implementation |
+| Implementation | 700–1000 words | System architecture diagram; detailed design and implementation of the three modules, synchronization primitive choices; core critical-section code snippets |
+| Benchmarks | 500–700 words | Testing methodology; system correctness verification; performance metrics analysis (task throughput, zone access latency, CPU usage); scalability/stress test results with charts/tables |
+| Discussion | ≥500 words | Analysis of test results; design trade-offs; system limitations and performance bottlenecks; comparison of different synchronization primitives; concurrency programming lessons learned |
+| Conclusion & Future Work | ≥300 words | Project outcomes summary; how objectives were achieved; potential improvements; future feature roadmap |
+| References | — | At least 20 references in APA format; must include Rust official documentation, relevant academic papers, and technical articles |
+
+- Outstanding reports may have opportunities for open publication; sufficient technical depth, clear writing, and comprehensive evaluation are required.
+
+### 5.3 Video Demonstration Deliverables
+Video length: **maximum 3 minutes**. Must clearly demonstrate system functionality and core OS concepts, meeting all technical and content requirements:
+
+#### Content Requirements (Suggested Structure, Optional)
+1. System Overview (30s): Brief explanation of system architecture, showing running system components;
+2. Live Demo (2 min): Demonstrate multi-robot concurrent operation, verify safe coordination of shared resources;
+3. Code Walkthrough (30s): Highlight core synchronization code, explain one key design decision.
+
+#### Technical Requirements
+- File size **≤ 50MB**; oversized files may be submitted as an unlisted YouTube video with a valid link;
+- MP4 or other common video format, clear and audible audio without noise;
+- Screen recording showing terminal output, system execution, and core operations;
+- Narration required — clear, logical, and aligned with the demo content.
+
+## 6. Grading Criteria
+Total score: 100%, assessed across **5 dimensions** with explicit weights and core criteria. **Synchronization is the highest-weighted dimension**:
+
+| Dimension | Weight | Core Criteria |
+|---|---|---|
+| Learning Outcome A: Concurrency | 25% | Multi-threaded safe execution with zero race conditions; shared state access meets concurrency safety requirements |
+| Learning Outcome B: Synchronization | 40% | All shared state (task queue, zones, health monitoring) remains consistent with no data corruption or state anomalies; synchronization primitives are used correctly and efficiently |
+| Learning Outcome C: Coordination | 10% | Correct multi-robot thread interaction logic; all three demo scenarios complete successfully without errors; no unexpected blocking or crashes |
+| Code Quality | 5% | Clear, readable code structure; idiomatic Rust style; rigorous error handling; reasonable test coverage |
+| Report & Demo | 20% | Well-structured and complete written report with clear logic; clear video demonstration with thorough feature verification and effective narration |
 
 ================================================================================
 
-PROJECT BLAZE - 完整项目文件结构
+PROJECT BLAZE — Complete Project File Structure
 
-参考 Linux 内核和现代 Rust 最佳实践设计
+Designed with reference to Linux kernel and modern Rust best practices
 
 ================================================================================
 
 project-blaze/
 
-├── Cargo.toml                      # Rust 项目配置文件
+├── Cargo.toml                      # Rust project configuration
 
-├── Cargo.lock                      # 依赖锁定文件
+├── Cargo.lock                      # Dependency lock file
 
-├── README.md                       # 项目说明文档
+├── README.md                       # Project documentation
 
-├── DESIGN.md                       # 设计文档
+├── DESIGN.md                       # Design document
 
-├── .gitignore                      # Git 忽略文件
+├── .gitignore                      # Git ignore file
 
 │
 
-├── src/                            # 源代码目录
+├── src/                            # Source code directory
 
-│   ├── main.rs                     # 应用入口，Demo 场景
+│   ├── main.rs                     # Application entry point, demo scenarios
 
-│   ├── lib.rs                      # 库根，导出公共 API
+│   ├── lib.rs                      # Library root, public API exports
 
-│   │
+│   │
 
-│   ├── types/                      # 类型定义模块（类似 Linux include/）
+│   ├── types/                      # Type definitions module (similar to Linux include/)
 
-│   │   ├── mod.rs                  # 模块根
+│   │   ├── mod.rs                  # Module root
 
-│   │   ├── task.rs                 # Task 类型定义
+│   │   ├── task.rs                 # Task type definition
 
-│   │   ├── robot.rs                # Robot 类型定义
+│   │   ├── robot.rs                # Robot type definition
 
-│   │   ├── zone.rs                 # Zone 类型定义
+│   │   ├── zone.rs                 # Zone type definition
 
-│   │   ├── config.rs               # Config 配置类型
+│   │   ├── config.rs               # Config type definition
 
-│   │   └── error.rs                # Error 错误类型
+│   │   └── error.rs                # Error type definition
 
-│   │
+│   │
 
-│   ├── scheduler/                  # 调度器模块（类似 Linux kernel/sched/）
+│   ├── scheduler/                  # Scheduler module (similar to Linux kernel/sched/)
 
-│   │   ├── mod.rs                  # 调度器接口定义
+│   │   ├── mod.rs                  # Scheduler interface definition
 
-│   │   ├── queue.rs                # 任务队列核心实现
+│   │   ├── queue.rs                # Task queue core implementation
 
-│   │   ├── fifo.rs                 # FIFO 调度策略
+│   │   ├── fifo.rs                 # FIFO scheduling policy
 
-│   │   ├── priority.rs             # 优先级调度（扩展）
+│   │   ├── priority.rs             # Priority scheduling (extension)
 
-│   │   ├── round_robin.rs          # Round Robin（扩展）
+│   │   ├── round_robin.rs          # Round Robin (extension)
 
-│   │   └── stats.rs                # 调度统计信息
+│   │   └── stats.rs                # Scheduling statistics
 
-│   │
+│   │
 
-│   ├── mm/                         # 资源管理模块（类似 Linux mm/）
+│   ├── mm/                         # Resource management module (similar to Linux mm/)
 
-│   │   ├── mod.rs                  # 资源管理接口
+│   │   ├── mod.rs                  # Resource management interface
 
-│   │   ├── zone_allocator.rs      # Zone 分配器核心
+│   │   ├── zone_allocator.rs      # Zone allocator core
 
-│   │   ├── lock_guard.rs           # RAII 锁保护
+│   │   ├── lock_guard.rs           # RAII lock guard
 
-│   │   ├── deadlock_detector.rs   # 死锁检测（扩展）
+│   │   ├── deadlock_detector.rs   # Deadlock detection (extension)
 
-│   │   └── allocation_table.rs    # 资源分配表
+│   │   └── allocation_table.rs    # Resource allocation table
 
-│   │
+│   │
 
-│   ├── monitor/                    # 监控模块（类似 systemd/watchdog）
+│   ├── monitor/                    # Monitoring module (similar to systemd/watchdog)
 
-│   │   ├── mod.rs                  # 监控接口定义
+│   │   ├── mod.rs                  # Monitor interface definition
 
-│   │   ├── heartbeat.rs            # 心跳监控实现
+│   │   ├── heartbeat.rs            # Heartbeat monitoring implementation
 
-│   │   ├── health_checker.rs      # 健康检查器
+│   │   ├── health_checker.rs      # Health checker
 
-│   │   ├── reporter.rs             # 状态报告器
+│   │   ├── reporter.rs             # Status reporter
 
-│   │   └── metrics.rs              # 监控指标收集
+│   │   └── metrics.rs              # Monitoring metrics collection
 
-│   │
+│   │
 
-│   ├── worker/                     # 工作线程模块（类似用户态进程）
+│   ├── worker/                     # Worker thread module (similar to userspace processes)
 
-│   │   ├── mod.rs                  # Worker trait 定义
+│   │   ├── mod.rs                  # Worker trait definition
 
-│   │   ├── robot.rs                # Robot Worker 实现
+│   │   ├── robot.rs                # Robot Worker implementation
 
-│   │   ├── pool.rs                 # Worker Pool 线程池
+│   │   ├── pool.rs                 # Worker Pool (thread pool)
 
-│   │   ├── state.rs                # Worker 状态机
+│   │   ├── state.rs                # Worker state machine
 
-│   │   └── lifecycle.rs            # 生命周期管理
+│   │   └── lifecycle.rs            # Lifecycle management
 
-│   │
+│   │
 
-│   ├── coordinator/                # 协调器模块（类似内核核心）
+│   ├── coordinator/                # Coordinator module (similar to kernel core)
 
-│   │   ├── mod.rs                  # Coordinator 实现
+│   │   ├── mod.rs                  # Coordinator implementation
 
-│   │   ├── builder.rs              # Builder 模式构造器
+│   │   ├── builder.rs              # Builder pattern constructor
 
-│   │   ├── syscall.rs              # 系统调用接口层
+│   │   ├── syscall.rs              # System call interface layer
 
-│   │   └── lifecycle.rs            # 系统生命周期管理
+│   │   └── lifecycle.rs            # System lifecycle management
 
-│   │
+│   │
 
-│   ├── sync/                       # 同步原语模块（类似 Linux kernel/locking/）
+│   ├── sync/                       # Synchronization primitives module (similar to Linux kernel/locking/)
 
-│   │   ├── mod.rs                  # 同步原语导出
+│   │   ├── mod.rs                  # Synchronization primitives exports
 
-│   │   ├── mutex.rs                # Mutex 封装
+│   │   ├── mutex.rs                # Mutex wrapper
 
-│   │   ├── rwlock.rs               # RwLock 封装
+│   │   ├── rwlock.rs               # RwLock wrapper
 
-│   │   ├── atomic.rs               # 原子操作封装
+│   │   ├── atomic.rs               # Atomic operations wrapper
 
-│   │   ├── channel.rs              # Channel 通信
+│   │   ├── channel.rs              # Channel communication
 
-│   │   └── barrier.rs              # 屏障同步
+│   │   └── barrier.rs              # Barrier synchronization
 
-│   │
+│   │
 
-│   ├── util/                       # 工具模块
+│   ├── util/                       # Utility module
 
-│   │   ├── mod.rs                  # 工具函数导出
+│   │   ├── mod.rs                  # Utility function exports
 
-│   │   ├── logger.rs               # 日志系统
+│   │   ├── logger.rs               # Logging system
 
-│   │   ├── timer.rs                # 计时器
+│   │   ├── timer.rs                # Timer
 
-│   │   ├── id_generator.rs         # ID 生成器
+│   │   ├── id_generator.rs         # ID generator
 
-│   │   └── rand.rs                 # 随机数生成
+│   │   └── rand.rs                 # Random number generation
 
-│   │
+│   │
 
-│   └── prelude.rs                  # 常用导入预设
+│   └── prelude.rs                  # Common imports prelude
 
 │
 
-├── tests/                          # 集成测试目录
+├── tests/                          # Integration tests directory
 
-│   ├── common/                     # 测试公共代码
+│   ├── common/                     # Test common code
 
-│   │   ├── mod.rs                  # 测试辅助函数
+│   │   ├── mod.rs                  # Test helper functions
 
-│   │   └── fixtures.rs             # 测试数据 fixtures
+│   │   └── fixtures.rs             # Test data fixtures
 
-│   │
+│   │
 
-│   ├── test_scheduler.rs           # 调度器集成测试
+│   ├── test_scheduler.rs           # Scheduler integration tests
 
-│   ├── test_zone_control.rs        # 区域控制测试
+│   ├── test_zone_control.rs        # Zone control tests
 
-│   ├── test_monitor.rs             # 监控模块测试
+│   ├── test_monitor.rs             # Monitor module tests
 
-│   ├── test_concurrency.rs         # 并发安全性测试
+│   ├── test_concurrency.rs         # Concurrency safety tests
 
-│   ├── test_demo_scenarios.rs      # Demo 场景测试
+│   ├── test_demo_scenarios.rs      # Demo scenario tests
 
-│   └── test_stress.rs              # 压力测试
-
-│
-
-├── benches/                        # 性能基准测试（使用 criterion）
-
-│   ├── scheduler_bench.rs          # 调度器性能测试
-
-│   ├── zone_lock_bench.rs          # 锁竞争性能测试
-
-│   ├── heartbeat_bench.rs          # 心跳检测性能测试
-
-│   └── throughput_bench.rs         # 系统吞吐量测试
+│   └── test_stress.rs              # Stress tests
 
 │
 
-├── examples/                       # 示例程序
+├── benches/                        # Performance benchmarks (using criterion)
 
-│   ├── basic_demo.rs               # 基础演示
+│   ├── scheduler_bench.rs          # Scheduler performance tests
 
-│   ├── priority_scheduling.rs     # 优先级调度示例
+│   ├── zone_lock_bench.rs          # Lock contention performance tests
 
-│   ├── deadlock_demo.rs            # 死锁检测示例
+│   ├── heartbeat_bench.rs          # Heartbeat detection performance tests
 
-│   └── high_load.rs                # 高负载测试
-
-│
-
-├── docs/                           # 文档目录
-
-│   ├── architecture.md             # 架构设计文档
-
-│   ├── api.md                      # API 使用文档
-
-│   ├── benchmarks.md               # 性能测试报告
-
-│   ├── images/                     # 文档图片
-
-│   │   ├── architecture.png        # 系统架构图
-
-│   │   └── execution_flow.png      # 执行流程图
-
-│   └── report_template.md          # 项目报告模板
+│   └── throughput_bench.rs         # System throughput tests
 
 │
 
-├── scripts/                        # 脚本工具
+├── examples/                       # Example programs
 
-│   ├── run_demo.sh                 # 运行 Demo 脚本
+│   ├── basic_demo.rs               # Basic demonstration
 
-│   ├── run_tests.sh                # 运行测试脚本
+│   ├── priority_scheduling.rs     # Priority scheduling example
 
-│   ├── generate_report.sh          # 生成报告脚本
+│   ├── deadlock_demo.rs            # Deadlock detection example
 
-│   └── benchmark.sh                # 性能测试脚本
+│   └── high_load.rs                # High-load test
 
 │
 
-└── config/                         # 配置文件目录
+├── docs/                           # Documentation directory
 
-├── default.toml                # 默认配置
+│   ├── architecture.md             # Architecture design document
 
-├── demo.toml                   # Demo 配置
+│   ├── api.md                      # API usage document
 
-└── stress.toml                 # 压力测试配置
+│   ├── benchmarks.md               # Performance test report
+
+│   ├── images/                     # Documentation images
+
+│   │   ├── architecture.png        # System architecture diagram
+
+│   │   └── execution_flow.png      # Execution flow diagram
+
+│   └── report_template.md          # Project report template
+
+│
+
+├── scripts/                        # Utility scripts
+
+│   ├── run_demo.sh                 # Run demo script
+
+│   ├── run_tests.sh                # Run tests script
+
+│   ├── generate_report.sh          # Generate report script
+
+│   └── benchmark.sh                # Performance benchmark script
+
+│
+
+└── config/                         # Configuration files directory
+
+    ├── default.toml                # Default configuration
+
+    ├── demo.toml                   # Demo configuration
+
+    └── stress.toml                 # Stress test configuration
