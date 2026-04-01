@@ -1,6 +1,6 @@
-# Medical Care Robot Coordination System
+# Project B
 
-This repository is a COMP2432 Operating Systems course project. It demonstrates OS-style ideas in a medical-robot scenario, focusing on **concurrency**, **synchronization**, and **task scheduling**.
+This is the COMP2432 Operating Systems course project. It demonstrates OS-style ideas in a medical-robot scenario, focusing on **concurrency**, **synchronization**, and **task scheduling**.
 
 ## Overview
 
@@ -15,7 +15,7 @@ During runtime, you can demonstrate the system in two ways:
 ## Project structure
 
 ```text
-Medical-Care-Robot-Coordination-System/
+sourcecode/
 ├─ COMP_2432project/              # Rust backend (Cargo crate)
 │  ├─ src/
 │  │  ├─ main.rs                  # Backend entry (HTTP API service)
